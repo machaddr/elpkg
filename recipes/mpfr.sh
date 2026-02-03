@@ -1,0 +1,33 @@
+#!/bin/bash
+set -euo pipefail
+
+pkgname="mpfr"
+pkgver="4.2.2"
+pkgrel=1
+arch=("i686")
+source=("https://ftpmirror.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz")
+sha256sums=("b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01")
+depends=("glibc" "gmp")
+
+makedepends=("bash" "binutils" "coreutils" "diffutils" "gawk" "gcc" "glibc" "grep" "gmp" "make" "sed" "texinfo")
+description="mpfr"
+
+build() {
+cd $srcdir
+tar -xf $srcdir/mpfr-$pkgver.tar.xz
+cd $srcdir/mpfr-$pkgver
+./configure --prefix=/usr        \
+            --disable-static     \
+            --enable-thread-safe \
+            --docdir=/usr/share/doc/mpfr
+
+make -j$(nproc)
+make -j$(nproc) html
+}
+
+package() {
+cd $srcdir/mpfr-$pkgver
+
+make DESTDIR="$pkgdir" install
+make DESTDIR="$pkgdir" install-html
+}

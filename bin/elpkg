@@ -1,0 +1,373 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use Getopt::Long qw(GetOptionsFromArray);
+use File::Spec;
+use Elpkg::Config;
+use Elpkg::Manager;
+use Elpkg::Util qw(json_write sha256_file openssl_sign);
+use JSON::PP;
+
+sub main {
+    my @argv = @ARGV;
+    my $config_path;
+    my $root;
+    my $assume_yes = 0;
+    my $overwrite = 0;
+    my $reinstall = 0;
+    my $upgrade = 0;
+    my $no_snapshot = 0;
+    my $fix = 0;
+    my $help = 0;
+
+    GetOptionsFromArray(
+        \@argv,
+        'config=s' => \$config_path,
+        'root=s' => \$root,
+        'yes' => \$assume_yes,
+        'overwrite' => \$overwrite,
+        'reinstall' => \$reinstall,
+        'upgrade' => \$upgrade,
+        'no-snapshot' => \$no_snapshot,
+        'fix' => \$fix,
+        'help' => \$help,
+    );
+
+    my $cmd = shift @argv || '';
+    if ($help || $cmd eq '' || $cmd eq 'help') {
+        print usage();
+        exit 0;
+    }
+
+    my $cfg = Elpkg::Config->load($config_path);
+    $cfg->{root} = $root if $root;
+    my $mgr = Elpkg::Manager->new($cfg);
+
+    if ($cmd eq 'sync') {
+        $mgr->sync();
+        print "synced\n";
+        exit 0;
+    }
+
+    if ($cmd eq 'search') {
+        my $pattern = shift @argv or die "search requires pattern\n";
+        my $hits = $mgr->search($pattern);
+        for my $pkg (@$hits) {
+            printf "%s %s-%s\n", $pkg->{name}, $pkg->{version}, ($pkg->{release}||1);
+        }
+        exit 0;
+    }
+
+    if ($cmd eq 'info') {
+        my $name = shift @argv or die "info requires package name\n";
+        my $pkg = $mgr->info($name) or die "not found: $name\n";
+        print format_pkg($pkg);
+        exit 0;
+    }
+
+    if ($cmd eq 'list') {
+        my $pkgs = $mgr->list_installed();
+        for my $name (sort keys %$pkgs) {
+            my $p = $pkgs->{$name};
+            printf "%s %s-%s\n", $name, $p->{version}, ($p->{release}||1);
+        }
+        exit 0;
+    }
+
+    if ($cmd eq 'tx') {
+        my $sub = shift @argv || '';
+        if ($sub eq 'list') {
+            my $list = $mgr->tx_list();
+            print join("\n", @$list), "\n" if @$list;
+            exit 0;
+        }
+        if ($sub eq 'show') {
+            my $id = shift @argv or die "tx show requires id\n";
+            my $tx = $mgr->tx_show($id) or die "tx not found: $id\n";
+            print JSON::PP->new->canonical->pretty->encode($tx);
+            exit 0;
+        }
+        if ($sub eq 'rollback') {
+            my $id = shift @argv || 'last';
+            if ($id eq 'last') {
+                my $list = $mgr->tx_list();
+                $id = $list && @$list ? $list->[-1] : '';
+            }
+            die "tx rollback requires id\n" if !$id;
+            $mgr->tx_rollback($id, { root => $root });
+            print "rolled back $id\n";
+            exit 0;
+        }
+        die "unknown tx command: $sub\n";
+    }
+
+    if ($cmd eq 'check') {
+        my $res = $mgr->check({ root => $root });
+        my $issues = 0;
+        if (@{ $res->{missing} }) {
+            $issues += scalar @{ $res->{missing} };
+            print "missing files:\n";
+            print join("\n", @{ $res->{missing} }), "\n";
+        }
+        if (@{ $res->{owner_mismatch} }) {
+            $issues += scalar @{ $res->{owner_mismatch} };
+            print "ownership mismatches:\n";
+            print join("\n", @{ $res->{owner_mismatch} }), "\n";
+        }
+        if (@{ $res->{orphan_records} }) {
+            $issues += scalar @{ $res->{orphan_records} };
+            print "orphan db records:\n";
+            print join("\n", @{ $res->{orphan_records} }), "\n";
+        }
+        if ($issues == 0) {
+            print "ok\n";
+        }
+        exit($issues ? 1 : 0);
+    }
+
+    if ($cmd eq 'verify') {
+        my $res = $mgr->verify({ root => $root, fix => $fix });
+        my $issues = 0;
+        if (@{ $res->{missing} }) {
+            $issues += scalar @{ $res->{missing} };
+            print "missing files:\n";
+            print join("\n", @{ $res->{missing} }), "\n";
+        }
+        if (@{ $res->{mismatched} }) {
+            $issues += scalar @{ $res->{mismatched} };
+            print "hash mismatches:\n";
+            print join("\n", @{ $res->{mismatched} }), "\n";
+        }
+        if (@{ $res->{config_modified} }) {
+            print "modified config files:\n";
+            print join("\n", @{ $res->{config_modified} }), "\n";
+        }
+        if (@{ $res->{no_hashes} }) {
+            print "packages without hashes:\n";
+            print join("\n", @{ $res->{no_hashes} }), "\n";
+        }
+        if ($issues == 0) {
+            print "ok\n";
+        }
+        exit($issues ? 1 : 0);
+    }
+
+    if ($cmd eq 'install') {
+        my $name = shift @argv or die "install requires package name or package file\n";
+        if (-f $name && $name =~ /\.elpkg\.tar\./) {
+            $mgr->install_pkgfile($name, {
+                root => $root,
+                overwrite => $overwrite,
+                reinstall => $reinstall,
+                upgrade => $upgrade,
+                no_snapshot => $no_snapshot,
+            });
+            print "installed $name\n";
+            exit 0;
+        }
+        $mgr->install($name, {
+            root => $root,
+            overwrite => $overwrite,
+            reinstall => $reinstall,
+            upgrade => $upgrade,
+            no_snapshot => $no_snapshot,
+        });
+        print "installed $name\n";
+        exit 0;
+    }
+
+    if ($cmd eq 'remove') {
+        my $name = shift @argv or die "remove requires package name\n";
+        $mgr->remove($name, { root => $root, no_snapshot => $no_snapshot });
+        print "removed $name\n";
+        exit 0;
+    }
+
+    if ($cmd eq 'update') {
+        $mgr->sync();
+        $mgr->update_all({ root => $root, overwrite => $overwrite, no_snapshot => $no_snapshot });
+        print "updated\n";
+        exit 0;
+    }
+
+    if ($cmd eq 'build') {
+        my $recipe = shift @argv or die "build requires recipe path\n";
+        my $out = $mgr->build_pkg($recipe, {});
+        print "$out\n";
+        exit 0;
+    }
+
+    if ($cmd eq 'repo') {
+        my $sub = shift @argv || '';
+        if ($sub eq 'index') {
+            my $dir = shift @argv or die "repo index requires directory\n";
+            repo_index($dir, $cfg);
+            exit 0;
+        }
+        if ($sub eq 'patches-index') {
+            my $dir = shift @argv or die "repo patches-index requires directory\n";
+            patches_index($dir, $cfg);
+            exit 0;
+        }
+        die "unknown repo command: $sub\n";
+    }
+
+    if ($cmd eq 'patches') {
+        my $sub = shift @argv || '';
+        if ($sub eq 'sync') {
+            $mgr->patches->sync();
+            print "patches synced\n";
+            exit 0;
+        }
+        if ($sub eq 'list') {
+            my $list = $mgr->patches->list();
+            for my $p (@$list) {
+                print $p->{filename}, "\n";
+            }
+            exit 0;
+        }
+        die "unknown patches command: $sub\n";
+    }
+
+    if ($cmd eq 'snapshot') {
+        my $sub = shift @argv || '';
+        if ($sub eq 'list') {
+            my $list = $mgr->snapshot->list();
+            print join("\n", @$list), "\n";
+            exit 0;
+        }
+        if ($sub eq 'create') {
+            my $name = shift @argv or die "snapshot create requires name\n";
+            my $snap = $mgr->snapshot->create($name);
+            print "$snap\n";
+            exit 0;
+        }
+        if ($sub eq 'restore') {
+            my $name = shift @argv or die "snapshot restore requires name\n";
+            $mgr->snapshot->restore($name);
+            print "restored $name\n";
+            exit 0;
+        }
+        die "unknown snapshot command: $sub\n";
+    }
+
+    die "unknown command: $cmd\n";
+}
+
+sub usage {
+    return <<'USAGE';
+Usage: elpkg [--config PATH] [--root PATH] [--yes] [--overwrite] [--upgrade] [--reinstall] [--no-snapshot] [--fix] <command>
+
+Commands:
+  sync                 Fetch repo index
+  search <pattern>     Search packages
+  info <name>          Show package info
+  list                 List installed packages
+  tx list              List transactions
+  tx show <id>         Show transaction details
+  tx rollback <id>     Roll back a transaction (or 'last')
+  check                Verify DB integrity and file ownership
+  verify               Verify file content integrity (use --fix to repair)
+  install <name>       Install package (resolves dependencies)
+  remove <name>        Remove package
+  update               Upgrade all installed packages
+  build <recipe>       Build package from recipe
+  repo index <dir>     Create repo index.json for a directory
+  repo patches-index <dir>  Create patches index.json for a directory
+  patches sync         Sync patches from repo
+  patches list         List patches from repo index
+  snapshot list        List snapshots
+  snapshot create <n>  Create snapshot
+  snapshot restore <n> Restore snapshot
+
+USAGE
+}
+
+sub format_pkg {
+    my ($pkg) = @_;
+    my $deps = join(', ', @{ $pkg->{deps} || [] });
+    return sprintf(
+        "Name: %s\nVersion: %s\nRelease: %s\nArch: %s\nDeps: %s\nDesc: %s\n",
+        $pkg->{name}, $pkg->{version}, ($pkg->{release}||1), ($pkg->{arch}||''),
+        $deps, ($pkg->{description}||'')
+    );
+}
+
+sub repo_index {
+    my ($dir, $cfg) = @_;
+    opendir my $dh, $dir or die "open $dir: $!";
+    my @files = grep { /\.elpkg\.tar\./ } readdir $dh;
+    closedir $dh;
+
+    my @packages;
+    for my $file (@files) {
+        my $path = File::Spec->catfile($dir, $file);
+        my $tmpdir = File::Spec->catdir($cfg->{tmp_dir}, 'repotmp');
+        my $meta_dir = File::Spec->catdir($tmpdir, $file . '.meta');
+        system('rm', '-rf', $meta_dir) if -d $meta_dir;
+        mkdir $meta_dir;
+        system('tar', '-xf', $path, '-C', $meta_dir, 'meta');
+        my $manifest_path = File::Spec->catfile($meta_dir, 'meta', 'manifest.json');
+        open my $fh, '<', $manifest_path or die "read $manifest_path: $!";
+        local $/; my $raw = <$fh>; close $fh;
+        my $manifest = eval { JSON::PP->new->utf8->decode($raw) };
+        next if !$manifest;
+        my $sha = sha256_file($path);
+        my $size = -s $path;
+        $manifest->{filename} = $file;
+        $manifest->{sha256} = $sha;
+        $manifest->{size} = $size;
+        my $sigfile = $file . '.sig';
+        my $sigpath = File::Spec->catfile($dir, $sigfile);
+        if ($cfg->{openssl_privkey}) {
+            openssl_sign($path, $sigpath, $cfg->{openssl_privkey});
+            $manifest->{sig} = $sigfile;
+        } elsif (-f $sigpath) {
+            $manifest->{sig} = $sigfile;
+        }
+        push @packages, $manifest;
+    }
+
+    my $index = {
+        generated_at => time(),
+        packages => \@packages,
+    };
+    my $index_path = File::Spec->catfile($dir, 'index.json');
+    json_write($index_path, $index);
+    if ($cfg->{openssl_privkey}) {
+        openssl_sign($index_path, $index_path . '.sig', $cfg->{openssl_privkey});
+    }
+}
+
+sub patches_index {
+    my ($dir, $cfg) = @_;
+    opendir my $dh, $dir or die "open $dir: $!";
+    my @files = grep { /\.patch$/ } readdir $dh;
+    closedir $dh;
+
+    my @patches;
+    for my $file (@files) {
+        my $path = File::Spec->catfile($dir, $file);
+        my $sha = sha256_file($path);
+        my $size = -s $path;
+        push @patches, {
+            filename => $file,
+            sha256 => $sha,
+            size => $size,
+        };
+    }
+
+    my $index = {
+        generated_at => time(),
+        patches => \@patches,
+    };
+    my $index_path = File::Spec->catfile($dir, 'index.json');
+    json_write($index_path, $index);
+    if ($cfg->{openssl_privkey}) {
+        openssl_sign($index_path, $index_path . '.sig', $cfg->{openssl_privkey});
+    }
+}
+
+main();
