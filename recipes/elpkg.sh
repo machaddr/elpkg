@@ -13,11 +13,11 @@ description="SomaLinux package manager"
 
 build() {
     cd "$srcdir"
-    tar -xzf "$srcdir/elpkg-$pkgver.tar.gz"
+    tar -xzf "$srcdir/$pkgver.tar.gz"
 }
 
 package() {
     local srcdir_pkg
-    srcdir_pkg="$srcdir/elpkg-elpkg-$pkgver"
+    srcdir_pkg="$srcdir/elpkg-$pkgver"
     make -C "$srcdir_pkg" DESTDIR="$pkgdir" install
 }
