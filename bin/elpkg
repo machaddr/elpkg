@@ -7,7 +7,7 @@ use Getopt::Long qw(GetOptionsFromArray);
 use File::Spec;
 use Elpkg::Config;
 use Elpkg::Manager;
-use Elpkg::Util qw(json_write sha256_file openssl_sign);
+use Elpkg::Util qw(json_write sha256_file openssl_sign ensure_dir);
 use JSON::PP;
 
 sub main {
@@ -298,17 +298,22 @@ sub format_pkg {
 sub repo_index {
     my ($dir, $cfg) = @_;
     opendir my $dh, $dir or die "open $dir: $!";
-    my @files = grep { /\.elpkg\.tar\./ } readdir $dh;
+    my @files = grep { /\.elpkg\.tar\.[^.]+$/ && $_ !~ /\.sig$/ } readdir $dh;
     closedir $dh;
 
     my @packages;
     for my $file (@files) {
         my $path = File::Spec->catfile($dir, $file);
         my $tmpdir = File::Spec->catdir($cfg->{tmp_dir}, 'repotmp');
+        ensure_dir($tmpdir);
         my $meta_dir = File::Spec->catdir($tmpdir, $file . '.meta');
         system('rm', '-rf', $meta_dir) if -d $meta_dir;
-        mkdir $meta_dir;
-        system('tar', '-xf', $path, '-C', $meta_dir, 'meta');
+        ensure_dir($meta_dir);
+        my $ok = system('tar', '-xf', $path, '-C', $meta_dir, './meta') == 0;
+        if (!$ok) {
+            $ok = system('tar', '-xf', $path, '-C', $meta_dir, 'meta') == 0;
+        }
+        die "tar extract meta failed for $file" if !$ok;
         my $manifest_path = File::Spec->catfile($meta_dir, 'meta', 'manifest.json');
         open my $fh, '<', $manifest_path or die "read $manifest_path: $!";
         local $/; my $raw = <$fh>; close $fh;
