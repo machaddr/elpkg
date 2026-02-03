@@ -315,11 +315,11 @@ sub _validate_paths {
 sub _extract_pkg_to {
     my ($self, $pkgfile, $dest) = @_;
     ensure_dir($dest);
-    my @flags = ('tar', '-xpf', $pkgfile, '-C', $dest, '--exclude=meta', '--exclude=./meta');
+    my @flags = ('tar', '-xpf', $pkgfile, '-C', $dest);
     if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
-        @flags = ('tar', '--zstd', '-xpf', $pkgfile, '-C', $dest, '--exclude=meta', '--exclude=./meta');
+        @flags = ('tar', '--zstd', '-xpf', $pkgfile, '-C', $dest);
     } elsif ($pkgfile =~ /\.xz$/) {
-        @flags = ('tar', '-xpf', $pkgfile, '-C', $dest, '--exclude=meta', '--exclude=./meta');
+        @flags = ('tar', '-xpf', $pkgfile, '-C', $dest);
     }
     push @flags, '--numeric-owner';
     push @flags, '--xattrs' if tar_supports_flag('--xattrs');
