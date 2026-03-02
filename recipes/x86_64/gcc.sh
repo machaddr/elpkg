@@ -19,6 +19,10 @@ cd $srcdir/gcc-$pkgver
 
 mkdir -v $srcdir/gcc-$pkgver/build && \
     cd $srcdir/gcc-$pkgver/build
+
+sed -e '/m64=/s/lib64/lib/' \
+    -i.orig gcc/config/i386/t-linux64
+
 ../configure --prefix=/usr              \
              --build="$SOMALINUX_TGT"   \
              LD=ld                      \

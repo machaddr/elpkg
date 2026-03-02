@@ -12,10 +12,20 @@ depends=("bzip2" "expat" "gdbm" "glibc" "libffi" "libxcrypt" "ncurses" "openssl"
 makedepends=("bash" "binutils" "coreutils" "expat" "gcc" "gdbm" "gettext" "glibc" "grep" "libffi" "libxcrypt" "make" "ncurses" "openssl" "pkgconf" "sed" "util-linux")
 description="python"
 
+configure_python_runtime_libpath() {
+    local paths=()
+    [[ -d /usr/lib64 ]] && paths+=("/usr/lib64")
+    [[ -d /usr/lib ]] && paths+=("/usr/lib")
+    if [[ ${#paths[@]} -gt 0 ]]; then
+        export LD_LIBRARY_PATH="$(IFS=:; echo "${paths[*]}")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+}
+
 build() {
 cd $srcdir
 tar -xf $srcdir/Python-$pkgver.tar.xz
 cd $srcdir/Python-$pkgver
+configure_python_runtime_libpath
 ./configure --prefix=/usr           \
             --enable-shared         \
             --with-system-expat     \
@@ -27,6 +37,7 @@ make -j$(nproc)
 
 package() {
 cd $srcdir/Python-$pkgver
+configure_python_runtime_libpath
 
 make DESTDIR="$pkgdir" install
 

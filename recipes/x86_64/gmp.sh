@@ -20,7 +20,7 @@ cd $srcdir/gmp-$pkgver
 # Make an adjustment for compatibility with gcc-15 and later
 sed -i '/long long t1;/,+1s/()/(...)/' configure
 
-ABI=32 ./configure --prefix=/usr    \
+ABI=64 ./configure --prefix=/usr    \
             --enable-cxx            \
             --disable-static        \
             --docdir=/usr/share/doc/gmp
