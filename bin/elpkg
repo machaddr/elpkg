@@ -20,6 +20,7 @@ sub main {
     my $upgrade = 0;
     my $no_snapshot = 0;
     my $fix = 0;
+    my $jobs;
     my $help = 0;
 
     GetOptionsFromArray(
@@ -32,6 +33,7 @@ sub main {
         'upgrade' => \$upgrade,
         'no-snapshot' => \$no_snapshot,
         'fix' => \$fix,
+        'jobs=i' => \$jobs,
         'help' => \$help,
     );
 
@@ -43,6 +45,7 @@ sub main {
 
     my $cfg = Elpkg::Config->load($config_path);
     $cfg->{root} = $root if $root;
+    $cfg->{make_jobs} = $jobs if defined $jobs;
     my $mgr = Elpkg::Manager->new($cfg);
 
     if ($cmd eq 'sync') {
@@ -258,7 +261,7 @@ sub main {
 
 sub usage {
     return <<'USAGE';
-Usage: elpkg [--config PATH] [--root PATH] [--yes] [--overwrite] [--upgrade] [--reinstall] [--no-snapshot] [--fix] <command>
+Usage: elpkg [--config PATH] [--root PATH] [--jobs N] [--yes] [--overwrite] [--upgrade] [--reinstall] [--no-snapshot] [--fix] <command>
 
 Commands:
   sync                 Fetch repo index

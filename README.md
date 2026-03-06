@@ -33,6 +33,7 @@ elpkg install --upgrade bash
 elpkg install --reinstall bash
 elpkg install --no-snapshot bash
 elpkg remove bash
+elpkg --jobs 8 build /path/to/recipe.sh
 elpkg tx list
 elpkg tx show <id>
 elpkg tx rollback <id>
@@ -118,9 +119,11 @@ The build system sets:
 - Set `auto_snapshot = true` to create a snapshot before installs/removes.
 - Use `--no-snapshot` to skip auto-snapshots for a single command.
 - Control transactions with `tx_enabled`, `tx_dir`, and `tx_keep` in `elpkg.conf`.
+- Control parallel jobs with `make_jobs` in `elpkg.conf`, `ELPKG_MAKE_JOBS`,
+  or `--jobs N` on the CLI. This applies to recipe builds, install/upgrade/remove
+  package scripts/hooks, and snapshot/transaction copy operations.
 - Config files under `/etc` are treated specially: if modified, new versions
   are installed as `.elpkg-new` files instead of overwriting.
 - `elpkg verify --fix` repairs files only when the original package file is available.
 - Script hardening options: `script_env_clean`, `script_keep_env`, `script_user`.
 - Source checksums can be set to `SKIP` during development.
-

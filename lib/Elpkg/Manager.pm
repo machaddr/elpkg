@@ -123,6 +123,7 @@ sub install {
             overwrite => $opts->{overwrite},
             upgrade => ($opts->{upgrade} ? 1 : 0),
             reinstall => $reinstall,
+            jobs => $opts->{jobs},
         });
     }
     return 1;

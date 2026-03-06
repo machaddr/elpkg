@@ -16,6 +16,7 @@ sub default_config {
         source_cache_dir => '',
         log_dir => '/var/log/elpkg',
         tmp_dir => '/var/tmp/elpkg',
+        make_jobs => 0,
         tx_enabled => 1,
         tx_dir => '/var/lib/elpkg/transactions',
         tx_keep => 20,
@@ -62,6 +63,11 @@ sub load {
     $cfg->{arch} = $ENV{ELPKG_ARCH} if defined $ENV{ELPKG_ARCH};
     $cfg->{verify_signatures} = 0 if defined $ENV{ELPKG_NO_VERIFY};
     $cfg->{source_cache_dir} = $ENV{ELPKG_SOURCE_CACHE} if defined $ENV{ELPKG_SOURCE_CACHE};
+    if (defined $ENV{ELPKG_MAKE_JOBS} && $ENV{ELPKG_MAKE_JOBS} =~ /^\d+$/) {
+        $cfg->{make_jobs} = int($ENV{ELPKG_MAKE_JOBS});
+    } elsif (defined $ENV{SOMALINUX_MAKE_JOBS} && $ENV{SOMALINUX_MAKE_JOBS} =~ /^\d+$/) {
+        $cfg->{make_jobs} = int($ENV{SOMALINUX_MAKE_JOBS});
+    }
 
     if (!$cfg->{patches_dir} || $cfg->{patches_dir} eq '') {
         my @candidates = (

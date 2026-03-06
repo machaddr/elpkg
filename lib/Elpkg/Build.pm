@@ -132,6 +132,16 @@ sub build_recipe {
         $tgt = $arch . '-soma-linux-gnu';
     }
 
+    my $jobs = $self->_resolve_make_jobs($opts);
+    my $nproc_shim_dir = File::Spec->catdir($work, 'tools-shim');
+    ensure_dir($nproc_shim_dir);
+    my $nproc_shim = File::Spec->catfile($nproc_shim_dir, 'nproc');
+    open my $nfh, '>', $nproc_shim or die "write $nproc_shim: $!";
+    print {$nfh} "#!/bin/sh\n";
+    print {$nfh} "printf '%s\\n' '$jobs'\n";
+    close $nfh;
+    chmod 0755, $nproc_shim;
+
     my %env = (
         SRCDIR => $srcdir,
         BUILDDIR => $builddir,
@@ -141,11 +151,17 @@ sub build_recipe {
         PKGREL => $pkgrel,
         PATCHDIR => ($self->{cfg}->{patches_dir} || ''),
         SOMALINUX_TGT => $tgt,
+        ELPKG_MAKE_JOBS => $jobs,
+        SOMALINUX_MAKE_JOBS => $jobs,
+        CMAKE_BUILD_PARALLEL_LEVEL => $jobs,
+        PATH => $nproc_shim_dir . ':' . ($ENV{PATH} // ''),
     );
 
     $env{RECIPE_PATH} = $use_path;
+    my %build_env = %env;
+    $build_env{MAKEFLAGS} = _makeflags_with_jobs($ENV{MAKEFLAGS}, $jobs);
     if ($funcs->{build}) {
-        run_cmd([$bash, '-c', 'set -e; srcdir="$SRCDIR"; builddir="$BUILDDIR"; pkgdir="$PKGDIR"; patchdir="$PATCHDIR"; . "$RECIPE_PATH"; build'], env => \%env, cwd => $builddir);
+        run_cmd([$bash, '-c', 'set -e; srcdir="$SRCDIR"; builddir="$BUILDDIR"; pkgdir="$PKGDIR"; patchdir="$PATCHDIR"; . "$RECIPE_PATH"; build'], env => \%build_env, cwd => $builddir);
     }
     if ($funcs->{package}) {
         run_cmd([$bash, '-c', 'set -e; srcdir="$SRCDIR"; builddir="$BUILDDIR"; pkgdir="$PKGDIR"; patchdir="$PATCHDIR"; . "$RECIPE_PATH"; package'], env => \%env, cwd => $builddir);
@@ -264,6 +280,50 @@ sub _find_local_source {
         return $path if -f $path;
     }
     return undef;
+}
+
+sub _resolve_make_jobs {
+    my ($self, $opts) = @_;
+    $opts ||= {};
+
+    my @candidates = (
+        $opts->{jobs},
+        $self->{cfg}->{make_jobs},
+        $ENV{ELPKG_MAKE_JOBS},
+        $ENV{SOMALINUX_MAKE_JOBS},
+    );
+    for my $v (@candidates) {
+        next if !defined $v;
+        next if $v !~ /^\d+$/;
+        my $n = int($v);
+        return $n if $n > 0;
+    }
+
+    for my $cmd ([qw(nproc)], [qw(getconf _NPROCESSORS_ONLN)]) {
+        my $out = eval { run_capture($cmd, quiet => 1) };
+        next if !defined $out || $@;
+        chomp $out;
+        next if $out !~ /^\d+$/;
+        my $n = int($out);
+        return $n if $n > 0;
+    }
+
+    return 1;
+}
+
+sub _makeflags_with_jobs {
+    my ($existing, $jobs) = @_;
+    $existing = '' if !defined $existing;
+
+    # Avoid conflicting explicit jobs values from parent environments.
+    $existing =~ s/(^|\s)-j\d*(?=\s|$)/ /g;
+    $existing =~ s/(^|\s)--jobs(?:=\d+|\s+\d+)?(?=\s|$)/ /g;
+    $existing =~ s/(^|\s)--jobserver-(?:fds|auth)=[^\s]+(?=\s|$)/ /g;
+    $existing =~ s/(^|\s)--jobserver-style=[^\s]+(?=\s|$)/ /g;
+    $existing =~ s/\s+/ /g;
+    $existing =~ s/^\s+|\s+$//g;
+
+    return $existing eq '' ? "-j$jobs" : "$existing -j$jobs";
 }
 
 1;

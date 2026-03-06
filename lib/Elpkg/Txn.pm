@@ -5,7 +5,7 @@ use warnings;
 use File::Spec;
 use File::Basename qw(dirname);
 use File::Path qw(remove_tree);
-use Elpkg::Util qw(ensure_dir json_read json_write);
+use Elpkg::Util qw(ensure_dir json_read json_write run_capture);
 
 sub new {
     my ($class, $cfg) = @_;
@@ -92,19 +92,37 @@ sub snapshot_db {
     my ($self, $tx) = @_;
     my $db_dir = $self->{cfg}->{db_dir};
     my $snap = $tx->{db_snapshot_dir};
-    ensure_dir($snap);
+    my $stage = File::Spec->catdir($tx->{dir}, 'db-snapshot-stage');
+    remove_tree($stage) if -d $stage;
+    ensure_dir($stage);
+    my $jobs = $self->_resolve_jobs();
+    my @pairs;
 
     for my $name (qw(installed.json files.json)) {
         my $src = File::Spec->catfile($db_dir, $name);
-        my $dst = File::Spec->catfile($snap, $name);
-        _copy_file($src, $dst) if -f $src;
+        my $dst = File::Spec->catfile($stage, $name);
+        push @pairs, [$src, $dst] if -f $src;
         my $sum = $src . '.sha256';
-        _copy_file($sum, $dst . '.sha256') if -f $sum;
+        push @pairs, [$sum, $dst . '.sha256'] if -f $sum;
     }
 
     my $pkg_src = File::Spec->catdir($db_dir, 'packages');
-    my $pkg_dst = File::Spec->catdir($snap, 'packages');
-    _copy_tree($pkg_src, $pkg_dst) if -d $pkg_src;
+    my $pkg_dst = File::Spec->catdir($stage, 'packages');
+    if (-d $pkg_src) {
+        _collect_tree_pairs($pkg_src, $pkg_dst, \@pairs);
+    }
+    my $ok = eval {
+        $self->_copy_many(\@pairs, $jobs);
+        1;
+    };
+    if (!$ok) {
+        my $err = $@ || 'transaction db snapshot failed';
+        remove_tree($stage) if -d $stage;
+        die $err;
+    }
+
+    remove_tree($snap) if -d $snap;
+    rename $stage, $snap or die "rename $stage -> $snap: $!";
 }
 
 sub restore_db {
@@ -112,21 +130,74 @@ sub restore_db {
     my $db_dir = $self->{cfg}->{db_dir};
     my $snap = $tx->{db_snapshot_dir};
     return if !-d $snap;
+    my $jobs = $self->_resolve_jobs();
+    my @pairs;
+    my $stage = File::Spec->catdir($tx->{dir}, 'db-restore-stage');
+    remove_tree($stage) if -d $stage;
+    ensure_dir($stage);
 
     for my $name (qw(installed.json files.json)) {
         my $src = File::Spec->catfile($snap, $name);
-        my $dst = File::Spec->catfile($db_dir, $name);
-        _copy_file($src, $dst) if -f $src;
+        my $dst = File::Spec->catfile($stage, $name);
+        push @pairs, [$src, $dst] if -f $src;
         my $sum = $src . '.sha256';
-        _copy_file($sum, $dst . '.sha256') if -f $sum;
+        push @pairs, [$sum, $dst . '.sha256'] if -f $sum;
     }
 
     my $pkg_src = File::Spec->catdir($snap, 'packages');
-    my $pkg_dst = File::Spec->catdir($db_dir, 'packages');
-    if (-d $pkg_dst) {
-        remove_tree($pkg_dst);
+    my $pkg_dst = File::Spec->catdir($stage, 'packages');
+    if (-d $pkg_src) {
+        _collect_tree_pairs($pkg_src, $pkg_dst, \@pairs);
     }
-    _copy_tree($pkg_src, $pkg_dst) if -d $pkg_src;
+
+    my $ok = eval {
+        $self->_copy_many(\@pairs, $jobs);
+        1;
+    };
+    if (!$ok) {
+        my $err = $@ || 'transaction db restore copy failed';
+        remove_tree($stage) if -d $stage;
+        die $err;
+    }
+
+    for my $name (qw(installed.json files.json)) {
+        my $staged = File::Spec->catfile($stage, $name);
+        my $dst = File::Spec->catfile($db_dir, $name);
+        if (-f $staged) {
+            _copy_file($staged, $dst);
+        } elsif (-f $dst) {
+            unlink $dst;
+        }
+
+        my $staged_sum = $staged . '.sha256';
+        my $dst_sum = $dst . '.sha256';
+        if (-f $staged_sum) {
+            _copy_file($staged_sum, $dst_sum);
+        } elsif (-f $dst_sum) {
+            unlink $dst_sum;
+        }
+    }
+
+    my $pkg_final = File::Spec->catdir($db_dir, 'packages');
+    my $pkg_stage = File::Spec->catdir($stage, 'packages');
+    my $pkg_backup = File::Spec->catdir($tx->{dir}, 'db-restore-packages-backup');
+    remove_tree($pkg_backup) if -d $pkg_backup;
+
+    if (-d $pkg_final) {
+        rename $pkg_final, $pkg_backup or die "rename $pkg_final -> $pkg_backup: $!";
+    }
+    if (-d $pkg_stage) {
+        if (!rename($pkg_stage, $pkg_final)) {
+            my $err = "rename $pkg_stage -> $pkg_final: $!";
+            if (-d $pkg_backup) {
+                rename $pkg_backup, $pkg_final;
+            }
+            remove_tree($stage) if -d $stage;
+            die $err;
+        }
+    }
+    remove_tree($pkg_backup) if -d $pkg_backup;
+    remove_tree($stage) if -d $stage;
 }
 
 sub rollback {
@@ -186,17 +257,22 @@ sub _prune {
 sub _copy_file {
     my ($src, $dst) = @_;
     ensure_dir(dirname($dst));
+    my $tmp = $dst . '.tmp.' . $$ . '.' . int(rand(100000));
     open my $in, '<', $src or die "copy $src: $!";
-    open my $out, '>', $dst or die "copy $dst: $!";
+    open my $out, '>', $tmp or die "copy $tmp: $!";
     binmode $in;
     binmode $out;
     while (read($in, my $buf, 8192)) { print {$out} $buf; }
     close $in;
     close $out;
+    if (!rename($tmp, $dst)) {
+        unlink $tmp;
+        die "rename $tmp -> $dst: $!";
+    }
 }
 
-sub _copy_tree {
-    my ($src, $dst) = @_;
+sub _collect_tree_pairs {
+    my ($src, $dst, $pairs) = @_;
     return if !-d $src;
     ensure_dir($dst);
     opendir my $dh, $src or return;
@@ -205,9 +281,9 @@ sub _copy_tree {
         my $s = File::Spec->catfile($src, $e);
         my $d = File::Spec->catfile($dst, $e);
         if (-d $s) {
-            _copy_tree($s, $d);
+            _collect_tree_pairs($s, $d, $pairs);
         } else {
-            _copy_file($s, $d);
+            push @$pairs, [$s, $d];
         }
     }
     closedir $dh;
@@ -228,6 +304,82 @@ sub _remove_path {
     } elsif (-d $path) {
         remove_tree($path);
     }
+}
+
+sub _copy_many {
+    my ($self, $pairs, $jobs) = @_;
+    return if !$pairs || !@$pairs;
+    $jobs = 1 if !$jobs || $jobs < 1;
+    $jobs = 32 if $jobs > 32;
+    $jobs = scalar(@$pairs) if $jobs > @$pairs;
+
+    if ($jobs <= 1) {
+        for my $pair (@$pairs) {
+            _copy_file($pair->[0], $pair->[1]);
+        }
+        return;
+    }
+
+    my @pids;
+    for my $worker (0 .. $jobs - 1) {
+        my $pid = fork();
+        die "fork failed: $!" if !defined $pid;
+        if ($pid == 0) {
+            my $ok = eval {
+                for (my $i = $worker; $i < @$pairs; $i += $jobs) {
+                    _copy_file($pairs->[$i][0], $pairs->[$i][1]);
+                }
+                1;
+            };
+            if (!$ok) {
+                my $err = $@ || 'txn copy worker failed';
+                print STDERR $err;
+                exit 1;
+            }
+            exit 0;
+        }
+        push @pids, $pid;
+    }
+
+    my $failed = 0;
+    for my $pid (@pids) {
+        my $wp = waitpid($pid, 0);
+        next if $wp < 0;
+        if ($? != 0) {
+            $failed = 1;
+            for my $other (@pids) {
+                next if $other == $pid;
+                kill 'TERM', $other;
+            }
+        }
+    }
+    die "transaction copy failed" if $failed;
+}
+
+sub _resolve_jobs {
+    my ($self) = @_;
+    my @candidates = (
+        $self->{cfg}->{make_jobs},
+        $ENV{ELPKG_MAKE_JOBS},
+        $ENV{SOMALINUX_MAKE_JOBS},
+    );
+    for my $v (@candidates) {
+        next if !defined $v;
+        next if $v !~ /^\d+$/;
+        my $n = int($v);
+        return $n if $n > 0;
+    }
+
+    for my $cmd ([qw(nproc)], [qw(getconf _NPROCESSORS_ONLN)]) {
+        my $out = eval { run_capture($cmd, quiet => 1) };
+        next if !defined $out || $@;
+        chomp $out;
+        next if $out !~ /^\d+$/;
+        my $n = int($out);
+        return $n if $n > 0;
+    }
+
+    return 1;
 }
 
 1;

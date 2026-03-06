@@ -30,11 +30,12 @@ sub install_pkg_file {
     my $overwrite = $opts->{overwrite} || 0;
     my $reinstall = $opts->{reinstall} || 0;
     my $upgrade = $opts->{upgrade} || 0;
+    my $jobs = $self->_resolve_make_jobs($opts);
 
     my $tmp_base = File::Spec->catdir($self->{cfg}->{tmp_dir}, 'install');
     my $tmp = temp_dir($tmp_base);
 
-    my ($manifest, $files, $scripts, $hashes) = $self->_read_meta($pkgfile, $tmp);
+    my ($manifest, $files, $scripts, $hashes) = $self->_read_meta($pkgfile, $tmp, $jobs);
     my $name = $manifest->{name};
 
     my $db = $self->{db};
@@ -73,15 +74,15 @@ sub install_pkg_file {
         }
 
         my $ok = eval {
-            $self->_run_hooks('pre_install', $root, $name, $action);
-            $self->_run_script($scripts->{pre_install}, $root, $name, 'pre_install') if $scripts->{pre_install};
+            $self->_run_hooks('pre_install', $root, $name, $action, $jobs);
+            $self->_run_script($scripts->{pre_install}, $root, $name, 'pre_install', $jobs) if $scripts->{pre_install};
 
             my $stage = $self->_tx_stage_dir($tx);
-            $self->_extract_pkg_to($pkgfile, $stage);
+            $self->_extract_pkg_to($pkgfile, $stage, $jobs);
             $self->_apply_staged($stage, $root, $files, $tx, $txn);
 
-            $self->_run_script($scripts->{post_install}, $root, $name, 'post_install') if $scripts->{post_install};
-            $self->_run_hooks('post_install', $root, $name, $action);
+            $self->_run_script($scripts->{post_install}, $root, $name, 'post_install', $jobs) if $scripts->{post_install};
+            $self->_run_hooks('post_install', $root, $name, $action, $jobs);
 
             1;
         };
@@ -155,6 +156,7 @@ sub remove_pkg {
     my ($self, $name, $opts) = @_;
     $opts ||= {};
     my $root = $opts->{root} || $self->{cfg}->{root};
+    my $jobs = $self->_resolve_make_jobs($opts);
 
     my $db = $self->{db};
     return $db->with_lock(sub {
@@ -172,8 +174,8 @@ sub remove_pkg {
         }
 
         my $ok = eval {
-            $self->_run_hooks('pre_remove', $root, $name, 'remove');
-            $self->_run_script($scripts->{pre_remove}, $root, $name, 'pre_remove') if $scripts->{pre_remove};
+            $self->_run_hooks('pre_remove', $root, $name, 'remove', $jobs);
+            $self->_run_script($scripts->{pre_remove}, $root, $name, 'pre_remove', $jobs) if $scripts->{pre_remove};
 
             for my $f (@$files) {
                 next if $files_db->{files}{$f} && $files_db->{files}{$f} ne $name;
@@ -190,8 +192,8 @@ sub remove_pkg {
 
             _cleanup_dirs($root, $files, $files_db->{files});
 
-            $self->_run_script($scripts->{post_remove}, $root, $name, 'post_remove') if $scripts->{post_remove};
-            $self->_run_hooks('post_remove', $root, $name, 'remove');
+            $self->_run_script($scripts->{post_remove}, $root, $name, 'post_remove', $jobs) if $scripts->{post_remove};
+            $self->_run_hooks('post_remove', $root, $name, 'remove', $jobs);
 
             delete $installed->{packages}{$name};
             $db->save_installed($installed);
@@ -233,13 +235,14 @@ sub _cleanup_dirs {
 }
 
 sub _read_meta {
-    my ($self, $pkgfile, $tmp) = @_;
+    my ($self, $pkgfile, $tmp, $jobs) = @_;
     ensure_dir($tmp);
+    my %tar_env = $self->_tar_env($jobs);
     my @list = ('tar', '-tf', $pkgfile);
     if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
         @list = ('tar', '--zstd', '-tf', $pkgfile);
     }
-    my $toc = run_capture(\@list, quiet => 1);
+    my $toc = run_capture(\@list, quiet => 1, env => \%tar_env);
     my @entries = grep { $_ ne '' } map { s/\r//gr } split /\n/, ($toc || '');
 
     my $meta_prefix;
@@ -256,14 +259,14 @@ sub _read_meta {
         if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
             @tar = ('tar', '--zstd', '-xf', $pkgfile, '-C', $tmp, '--wildcards', $pattern);
         }
-        run_cmd(\@tar);
+        run_cmd(\@tar, env => \%tar_env);
     } else {
         # Fallback: extract whole package and locate meta directory
         my @full = ('tar', '-xf', $pkgfile, '-C', $tmp);
         if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
             @full = ('tar', '--zstd', '-xf', $pkgfile, '-C', $tmp);
         }
-        run_cmd(\@full);
+        run_cmd(\@full, env => \%tar_env);
     }
 
     my $meta_dir = File::Spec->catdir($tmp, 'meta');
@@ -313,8 +316,9 @@ sub _validate_paths {
 }
 
 sub _extract_pkg_to {
-    my ($self, $pkgfile, $dest) = @_;
+    my ($self, $pkgfile, $dest, $jobs) = @_;
     ensure_dir($dest);
+    my %tar_env = $self->_tar_env($jobs);
     my @flags = ('tar', '-xpf', $pkgfile, '-C', $dest);
     if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
         @flags = ('tar', '--zstd', '-xpf', $pkgfile, '-C', $dest);
@@ -324,7 +328,7 @@ sub _extract_pkg_to {
     push @flags, '--numeric-owner';
     push @flags, '--xattrs' if tar_supports_flag('--xattrs');
     push @flags, '--acls' if tar_supports_flag('--acls');
-    run_cmd(\@flags);
+    run_cmd(\@flags, env => \%tar_env);
 }
 
 sub _apply_staged {
@@ -438,7 +442,7 @@ sub _remove_path {
 }
 
 sub _run_script {
-    my ($self, $content, $root, $pkg, $phase) = @_;
+    my ($self, $content, $root, $pkg, $phase, $jobs) = @_;
     my $base = File::Spec->catdir($self->{cfg}->{tmp_dir}, 'scripts');
     ensure_dir($base);
     my $tmp = tempdir('elpkg-script-XXXXXX', DIR => $base, CLEANUP => 0);
@@ -451,7 +455,12 @@ sub _run_script {
     chmod 0755, $path;
 
     my $bash = $ENV{ELPKG_BASH} || which_cmd('bash') || '/bin/bash';
-    my %env = (ELPKG_ROOT => $root, ELPKG_PKG => $pkg);
+    my %jobs_env = $self->_jobs_env($jobs);
+    my %env = (
+        ELPKG_ROOT => $root,
+        ELPKG_PKG => $pkg,
+        %jobs_env,
+    );
     my $script_user = $self->{cfg}->{script_user} || '';
     my $env_clean = $self->{cfg}->{script_env_clean};
     my $keep = $self->{cfg}->{script_keep_env} || '';
@@ -474,6 +483,9 @@ sub _run_script {
             }
             my @pairs = map { "$_=$keepvars{$_}" } sort keys %keepvars;
             push @pairs, "ELPKG_ROOT=$root", "ELPKG_PKG=$pkg";
+            for my $k (sort keys %jobs_env) {
+                push @pairs, "$k=$jobs_env{$k}";
+            }
             run_cmd([$envbin, '-i', @pairs, @cmd]);
             return;
         }
@@ -483,7 +495,7 @@ sub _run_script {
 }
 
 sub _run_hooks {
-    my ($self, $phase, $root, $pkg, $action) = @_;
+    my ($self, $phase, $root, $pkg, $action, $jobs) = @_;
     return if !$self->{cfg}->{hooks_enabled};
     my $base = $self->{cfg}->{hooks_dir};
     return if !$base || !-d $base;
@@ -521,6 +533,7 @@ sub _run_hooks {
             ELPKG_PKG => $pkg,
             ELPKG_PHASE => $phase,
             ELPKG_ACTION => $action,
+            $self->_jobs_env($jobs),
         );
         my $script_user = $self->{cfg}->{script_user} || '';
         my $env_clean = $self->{cfg}->{script_env_clean};
@@ -548,6 +561,10 @@ sub _run_hooks {
                     "ELPKG_PKG=$pkg",
                     "ELPKG_PHASE=$phase",
                     "ELPKG_ACTION=$action";
+                for my $k (sort keys %env) {
+                    next if $k =~ /^ELPKG_(?:ROOT|PKG|PHASE|ACTION)$/;
+                    push @pairs, "$k=$env{$k}";
+                }
                 run_cmd([$envbin, '-i', @pairs, @cmd]);
                 next;
             }
@@ -617,9 +634,10 @@ sub repair_files {
     my ($self, $pkgfile, $opts, $rels) = @_;
     $opts ||= {};
     my $root = $opts->{root} || $self->{cfg}->{root};
+    my $jobs = $self->_resolve_make_jobs($opts);
     my $tmp_base = File::Spec->catdir($self->{cfg}->{tmp_dir}, 'repair');
     my $tmp = temp_dir($tmp_base);
-    my ($manifest, $files, $scripts, $hashes) = $self->_read_meta($pkgfile, $tmp);
+    my ($manifest, $files, $scripts, $hashes) = $self->_read_meta($pkgfile, $tmp, $jobs);
     my %set = map { $_ => 1 } @{ $files || [] };
     my @want = grep { $set{$_} } @{ $rels || [] };
     return 1 if !@want;
@@ -633,7 +651,7 @@ sub repair_files {
 
     my $ok = eval {
         my $stage = $self->_tx_stage_dir($tx);
-        $self->_extract_pkg_to($pkgfile, $stage);
+        $self->_extract_pkg_to($pkgfile, $stage, $jobs);
         $self->_apply_staged($stage, $root, \@want, $tx, $txn);
         1;
     };
@@ -680,6 +698,77 @@ sub _format_conflicts {
 sub _is_config_file {
     my ($self, $rel) = @_;
     return $rel =~ m{^etc/};
+}
+
+sub _resolve_make_jobs {
+    my ($self, $opts) = @_;
+    $opts ||= {};
+
+    my @candidates = (
+        $opts->{jobs},
+        $self->{cfg}->{make_jobs},
+        $ENV{ELPKG_MAKE_JOBS},
+        $ENV{SOMALINUX_MAKE_JOBS},
+    );
+    for my $v (@candidates) {
+        next if !defined $v;
+        next if $v !~ /^\d+$/;
+        my $n = int($v);
+        return $n if $n > 0;
+    }
+
+    for my $cmd ([qw(nproc)], [qw(getconf _NPROCESSORS_ONLN)]) {
+        my $out = eval { run_capture($cmd, quiet => 1) };
+        next if !defined $out || $@;
+        chomp $out;
+        next if $out !~ /^\d+$/;
+        my $n = int($out);
+        return $n if $n > 0;
+    }
+
+    return 1;
+}
+
+sub _jobs_env {
+    my ($self, $jobs) = @_;
+    $jobs = $self->_resolve_make_jobs({}) if !defined $jobs || $jobs !~ /^\d+$/ || $jobs < 1;
+    return (
+        ELPKG_MAKE_JOBS => $jobs,
+        SOMALINUX_MAKE_JOBS => $jobs,
+        CMAKE_BUILD_PARALLEL_LEVEL => $jobs,
+        MAKEFLAGS => _makeflags_with_jobs($ENV{MAKEFLAGS}, $jobs),
+    );
+}
+
+sub _tar_env {
+    my ($self, $jobs) = @_;
+    $jobs = $self->_resolve_make_jobs({}) if !defined $jobs || $jobs !~ /^\d+$/ || $jobs < 1;
+    return (
+        ZSTD_NBTHREADS => $jobs,
+        XZ_DEFAULTS => _xz_defaults_with_threads($ENV{XZ_DEFAULTS}, $jobs),
+    );
+}
+
+sub _makeflags_with_jobs {
+    my ($existing, $jobs) = @_;
+    $existing = '' if !defined $existing;
+    $existing =~ s/(^|\s)-j\d*(?=\s|$)/ /g;
+    $existing =~ s/(^|\s)--jobs(?:=\d+|\s+\d+)?(?=\s|$)/ /g;
+    $existing =~ s/(^|\s)--jobserver-(?:fds|auth)=[^\s]+(?=\s|$)/ /g;
+    $existing =~ s/(^|\s)--jobserver-style=[^\s]+(?=\s|$)/ /g;
+    $existing =~ s/\s+/ /g;
+    $existing =~ s/^\s+|\s+$//g;
+    return $existing eq '' ? "-j$jobs" : "$existing -j$jobs";
+}
+
+sub _xz_defaults_with_threads {
+    my ($existing, $jobs) = @_;
+    $existing = '' if !defined $existing;
+    $existing =~ s/(^|\s)-T\d*(?=\s|$)/ /g;
+    $existing =~ s/(^|\s)--threads(?:=\d+|\s+\d+)?(?=\s|$)/ /g;
+    $existing =~ s/\s+/ /g;
+    $existing =~ s/^\s+|\s+$//g;
+    return $existing eq '' ? "-T$jobs" : "$existing -T$jobs";
 }
 
 1;
