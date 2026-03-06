@@ -17,11 +17,11 @@ cd $srcdir
 tar -xf $srcdir/gcc-$pkgver.tar.xz
 cd $srcdir/gcc-$pkgver
 
-mkdir -v $srcdir/gcc-$pkgver/build && \
-    cd $srcdir/gcc-$pkgver/build
-
 sed -e '/m64=/s/lib64/lib/' \
     -i.orig gcc/config/i386/t-linux64
+
+mkdir -v $srcdir/gcc-$pkgver/build && \
+    cd $srcdir/gcc-$pkgver/build
 
 ../configure --prefix=/usr              \
              --build="$SOMALINUX_TGT"   \
