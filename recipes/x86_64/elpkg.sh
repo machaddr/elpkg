@@ -13,7 +13,7 @@ description="SomaLinux package manager"
 
 build() {
     cd "$srcdir"
-    tar -xzf "$srcdir/v$pkgver.tar.gz"
+    tar -xzf "$srcdir/elpkg-$pkgver.tar.gz"
 }
 
 package() {
