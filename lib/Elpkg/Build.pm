@@ -234,11 +234,12 @@ sub build_recipe {
     my $outdir = $opts->{outdir} || File::Spec->catdir($self->{cfg}->{cache_dir}, 'packages');
     ensure_dir($outdir);
     my $outpath = File::Spec->catfile($outdir, $pkgfile);
+    my %tar_env = _tar_env($jobs);
 
     if ($ext eq 'zst') {
-        run_cmd(['tar', '--zstd', '-cpf', $outpath, '-C', $pkgdir, '.']);
+        run_cmd(['tar', '--zstd', '-cpf', $outpath, '-C', $pkgdir, '.'], env => \%tar_env);
     } else {
-        run_cmd(['tar', '-cJf', $outpath, '-C', $pkgdir, '.']);
+        run_cmd(['tar', '-cJf', $outpath, '-C', $pkgdir, '.'], env => \%tar_env);
     }
 
     unlink $use_path if $cleanup_recipe;
@@ -324,6 +325,25 @@ sub _makeflags_with_jobs {
     $existing =~ s/^\s+|\s+$//g;
 
     return $existing eq '' ? "-j$jobs" : "$existing -j$jobs";
+}
+
+sub _tar_env {
+    my ($jobs) = @_;
+    $jobs = 1 if !defined $jobs || $jobs !~ /^\d+$/ || $jobs < 1;
+    return (
+        ZSTD_NBTHREADS => $jobs,
+        XZ_DEFAULTS => _xz_defaults_with_threads($ENV{XZ_DEFAULTS}, $jobs),
+    );
+}
+
+sub _xz_defaults_with_threads {
+    my ($existing, $jobs) = @_;
+    $existing = '' if !defined $existing;
+    $existing =~ s/(^|\s)-T\d*(?=\s|$)/ /g;
+    $existing =~ s/(^|\s)--threads(?:=\d+|\s+\d+)?(?=\s|$)/ /g;
+    $existing =~ s/\s+/ /g;
+    $existing =~ s/^\s+|\s+$//g;
+    return $existing eq '' ? "-T$jobs" : "$existing -T$jobs";
 }
 
 1;
