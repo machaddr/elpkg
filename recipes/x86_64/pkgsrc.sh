@@ -27,14 +27,17 @@ package() {
 
 post_install() {
   PKGSRC_DIR="/usr/pkgsrc"
-  PKGSRC_JOBS="${PKGSRC_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
 
   if [ -x "$PKGSRC_DIR/bootstrap/bootstrap" ]; then
-    (cd "$PKGSRC_DIR/bootstrap" && ./bootstrap \
-      --prefix=/usr/pkg \
-      --pkgdbdir=/usr/pkg/pkgdb \
-      --varbase=/var \
-      --make-jobs="$PKGSRC_JOBS")
+    (
+      # pkgsrc bootstrap rejects infrastructure parallelism; do not leak job flags in.
+      unset CMAKE_BUILD_PARALLEL_LEVEL ELPKG_MAKE_JOBS MAKEFLAGS MAKE_JOBS PKGSRC_JOBS SOMALINUX_MAKE_JOBS
+      cd "$PKGSRC_DIR/bootstrap"
+      ./bootstrap \
+        --prefix=/usr/pkg \
+        --pkgdbdir=/usr/pkg/pkgdb \
+        --varbase=/var
+    )
   else
     echo "ERROR: pkgsrc bootstrap script not found at $PKGSRC_DIR/bootstrap." >&2
     return 1
