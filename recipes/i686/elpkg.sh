@@ -2,11 +2,11 @@
 set -euo pipefail
 
 pkgname="elpkg"
-pkgver="0.2"
+pkgver="0.3"
 pkgrel=1
 arch=("i686")
 source=("https://github.com/machaddr/elpkg/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=("4401d83bade3b15f09778276c5e29c8d0404340e477b21cf0400aa74001d128a")
+sha256sums=("1d464b91b79c70deaf26e290de3b1e72fe5846646b6aaf43f461041e60f43f97")
 depends=("perl" "openssl" "tar" "xz" "zstd")
 makedepends=("make")
 description="SomaLinux package manager"
