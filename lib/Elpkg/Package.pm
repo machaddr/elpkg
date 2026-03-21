@@ -7,8 +7,9 @@ use File::Temp qw(tempdir);
 use File::Basename qw(dirname);
 use File::Path qw(make_path remove_tree);
 use File::Find qw(find);
+use Elpkg::PkgMeta qw(read_package_meta meta_db_name meta_db_relpath);
 use Elpkg::Util qw(
-  ensure_dir read_file json_read run_cmd run_capture tar_supports_flag
+  ensure_dir run_cmd run_capture tar_supports_flag
   sha256_file
   temp_dir which_cmd
 );
@@ -35,7 +36,7 @@ sub install_pkg_file {
     my $tmp_base = File::Spec->catdir($self->{cfg}->{tmp_dir}, 'install');
     my $tmp = temp_dir($tmp_base);
 
-    my ($manifest, $files, $scripts, $hashes) = $self->_read_meta($pkgfile, $tmp, $jobs);
+    my ($manifest, $files, $scripts, $hashes, $config_files) = $self->_read_meta($pkgfile, $tmp, $jobs);
     my $name = $manifest->{name};
 
     my $db = $self->{db};
@@ -138,13 +139,12 @@ sub install_pkg_file {
 
         $db->save_installed($installed);
         $db->save_files($files_db);
-        my @config_files = grep { $_ =~ m{^etc/} } @$files;
         $db->save_pkg($name, {
             manifest => $manifest,
             files => $files,
             scripts => $scripts,
             hashes => $hashes || {},
-            config_files => \@config_files,
+            config_files => $config_files || [],
         });
 
         $self->_tx_commit($tx, $txn);
@@ -246,15 +246,16 @@ sub _read_meta {
     my @entries = grep { $_ ne '' } map { s/\r//gr } split /\n/, ($toc || '');
 
     my $meta_prefix;
+    my $meta_rel = meta_db_relpath();
     for my $e (@entries) {
-        if ($e =~ m{^(?:\./)?meta/manifest\.json$}) {
-            ($meta_prefix) = $e =~ m{^(.*?/)?meta/manifest\.json$};
+        if ($e =~ m{^(?:\./)?\Q$meta_rel\E$}) {
+            ($meta_prefix) = $e =~ m{^(.*?/)?\Q$meta_rel\E$};
             last;
         }
     }
 
     if ($meta_prefix) {
-        my $pattern = ($meta_prefix // '') . 'meta/*';
+        my $pattern = ($meta_prefix // '') . $meta_rel;
         my @tar = ('tar', '-xf', $pkgfile, '-C', $tmp, '--wildcards', $pattern);
         if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
             @tar = ('tar', '--zstd', '-xf', $pkgfile, '-C', $tmp, '--wildcards', $pattern);
@@ -270,40 +271,30 @@ sub _read_meta {
     }
 
     my $meta_dir = File::Spec->catdir($tmp, 'meta');
-    if (!-f File::Spec->catfile($meta_dir, 'manifest.json')) {
+    my $meta_name = meta_db_name();
+    my $meta_db = File::Spec->catfile($meta_dir, $meta_name);
+    if (!-f $meta_db) {
         my $found;
         find({
             wanted => sub {
                 return if $found;
-                return if $_ ne 'manifest.json';
+                return if $_ ne $meta_name;
                 my $path = $File::Find::name;
-                if ($path =~ /[\\\/]meta[\\\/]manifest\.json$/) {
+                if ($path =~ /[\\\/]meta[\\\/]\Q$meta_name\E$/) {
                     $found = $path;
                 }
             },
             no_chdir => 1,
         }, $tmp);
         if ($found) {
-            $meta_dir = File::Spec->catdir(File::Spec->catdir($found, File::Spec->updir), File::Spec->updir);
+            $meta_db = $found;
         }
     }
 
-    my $manifest = json_read(File::Spec->catfile($meta_dir, 'manifest.json'))
-        or die 'missing manifest.json';
-    my $hashes = json_read(File::Spec->catfile($meta_dir, 'hashes.json')) || {};
-    my $files_list = read_file(File::Spec->catfile($meta_dir, 'files.list'));
-    my @files = grep { $_ ne '' } map { s/\r//gr } split /\n/, $files_list;
-    _validate_paths(\@files);
+    my ($manifest, $files, $scripts, $hashes, $config_files) = read_package_meta($meta_db);
+    _validate_paths($files);
 
-    my %scripts;
-    for my $name (qw(pre_install post_install pre_remove post_remove)) {
-        my $path = File::Spec->catfile($meta_dir, 'scripts', $name);
-        if (-f $path) {
-            $scripts{$name} = read_file($path);
-        }
-    }
-
-    return ($manifest, \@files, \%scripts, $hashes);
+    return ($manifest, $files, $scripts, $hashes, $config_files);
 }
 
 sub _validate_paths {

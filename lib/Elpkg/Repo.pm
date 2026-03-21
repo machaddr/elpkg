@@ -3,7 +3,8 @@ package Elpkg::Repo;
 use strict;
 use warnings;
 use File::Spec;
-use Elpkg::Util qw(ensure_dir download_file json_read json_write sha256_file openssl_verify);
+use Elpkg::Summary qw(read_pkg_summary);
+use Elpkg::Util qw(ensure_dir download_file sha256_file openssl_verify);
 use Elpkg::Version qw(cmp_version);
 
 sub new {
@@ -24,14 +25,14 @@ sub repo_base {
 
 sub index_path {
     my ($self) = @_;
-    return File::Spec->catfile($self->{cfg}->{cache_dir}, 'repo', 'index.json');
+    return File::Spec->catfile($self->{cfg}->{cache_dir}, 'repo', 'pkg_summary.gz');
 }
 
 sub fetch_index {
     my ($self) = @_;
     my $base = $self->repo_base();
-    my $index_url = "$base/index.json";
-    my $sig_url = "$base/index.json.sig";
+    my $index_url = "$base/pkg_summary.gz";
+    my $sig_url = "$base/pkg_summary.gz.sig";
 
     my $index_path = $self->index_path();
     ensure_dir(File::Spec->catdir($self->{cfg}->{cache_dir}, 'repo'));
@@ -57,8 +58,7 @@ sub load_index {
     if (!-f $path) {
         $self->fetch_index();
     }
-    my $data = json_read($path);
-    return $data;
+    return read_pkg_summary($path);
 }
 
 sub find_package {

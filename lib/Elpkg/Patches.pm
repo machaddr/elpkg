@@ -3,7 +3,8 @@ package Elpkg::Patches;
 use strict;
 use warnings;
 use File::Spec;
-use Elpkg::Util qw(ensure_dir download_file json_read json_write sha256_file openssl_verify);
+use Elpkg::Summary qw(read_patches_summary);
+use Elpkg::Util qw(ensure_dir download_file sha256_file openssl_verify);
 
 sub new {
     my ($class, $cfg) = @_;
@@ -23,14 +24,14 @@ sub base_url {
 
 sub index_path {
     my ($self) = @_;
-    return File::Spec->catfile($self->{cfg}->{cache_dir}, 'patches', 'index.json');
+    return File::Spec->catfile($self->{cfg}->{cache_dir}, 'patches', 'patches_summary.gz');
 }
 
 sub fetch_index {
     my ($self) = @_;
     my $base = $self->base_url();
-    my $index_url = "$base/index.json";
-    my $sig_url = "$base/index.json.sig";
+    my $index_url = "$base/patches_summary.gz";
+    my $sig_url = "$base/patches_summary.gz.sig";
     my $index_path = $self->index_path();
 
     ensure_dir(File::Spec->catdir($self->{cfg}->{cache_dir}, 'patches'));
@@ -50,8 +51,7 @@ sub load_index {
     if (!-f $path) {
         $self->fetch_index();
     }
-    my $data = json_read($path);
-    return $data;
+    return read_patches_summary($path);
 }
 
 sub list {

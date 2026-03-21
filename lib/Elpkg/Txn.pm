@@ -2,10 +2,11 @@ package Elpkg::Txn;
 
 use strict;
 use warnings;
+use DBI;
 use File::Spec;
 use File::Basename qw(dirname);
 use File::Path qw(remove_tree);
-use Elpkg::Util qw(ensure_dir json_read json_write run_capture);
+use Elpkg::Util qw(ensure_dir run_capture);
 
 sub new {
     my ($class, $cfg) = @_;
@@ -52,8 +53,26 @@ sub begin {
 
 sub update {
     my ($self, $tx) = @_;
-    my $path = File::Spec->catfile($tx->{dir}, 'tx.json');
-    json_write($path, $tx);
+    my $path = $self->_tx_db_path($tx->{dir});
+    my $dbh = $self->_connect_tx_db($path);
+
+    $dbh->begin_work();
+    $dbh->do('DELETE FROM meta');
+    $dbh->do('DELETE FROM added');
+    $dbh->do('DELETE FROM backups');
+
+    my $meta_sth = $dbh->prepare('INSERT INTO meta(key, value) VALUES(?, ?)');
+    for my $key (sort grep { !ref $tx->{$_} } keys %$tx) {
+        my $value = $tx->{$key};
+        $value = '' if !defined $value;
+        $meta_sth->execute($key, $value);
+    }
+
+    $self->_store_array($dbh, 'added', $tx->{added} || []);
+    $self->_store_array($dbh, 'backups', $tx->{backups} || []);
+
+    $dbh->commit();
+    $dbh->disconnect();
 }
 
 sub commit {
@@ -74,8 +93,16 @@ sub fail {
 
 sub load {
     my ($self, $id) = @_;
-    my $path = File::Spec->catfile($self->base_dir(), $id, 'tx.json');
-    return json_read($path);
+    my $path = $self->_tx_db_path(File::Spec->catdir($self->base_dir(), $id));
+    return undef if !-f $path;
+
+    my $dbh = $self->_connect_tx_db($path);
+    my $rows = $dbh->selectall_arrayref('SELECT key, value FROM meta', { Slice => {} });
+    my %tx = map { $_->{key} => $_->{value} } @$rows;
+    $tx{added} = $self->_load_array($dbh, 'added');
+    $tx{backups} = $self->_load_array($dbh, 'backups');
+    $dbh->disconnect();
+    return \%tx;
 }
 
 sub list {
@@ -90,114 +117,30 @@ sub list {
 
 sub snapshot_db {
     my ($self, $tx) = @_;
-    my $db_dir = $self->{cfg}->{db_dir};
-    my $snap = $tx->{db_snapshot_dir};
-    my $stage = File::Spec->catdir($tx->{dir}, 'db-snapshot-stage');
-    remove_tree($stage) if -d $stage;
-    ensure_dir($stage);
-    my $jobs = $self->_resolve_jobs();
-    my @pairs;
+    my $db_path = $self->_db_path();
+    my $snap = File::Spec->catfile($tx->{db_snapshot_dir}, 'elpkg.sqlite');
 
-    for my $name (qw(installed.json files.json)) {
-        my $src = File::Spec->catfile($db_dir, $name);
-        my $dst = File::Spec->catfile($stage, $name);
-        push @pairs, [$src, $dst] if -f $src;
-        my $sum = $src . '.sha256';
-        push @pairs, [$sum, $dst . '.sha256'] if -f $sum;
+    ensure_dir($tx->{db_snapshot_dir});
+    if (-f $db_path) {
+        _copy_file($db_path, $snap);
+        return;
     }
 
-    my $pkg_src = File::Spec->catdir($db_dir, 'packages');
-    my $pkg_dst = File::Spec->catdir($stage, 'packages');
-    if (-d $pkg_src) {
-        _collect_tree_pairs($pkg_src, $pkg_dst, \@pairs);
-    }
-    my $ok = eval {
-        $self->_copy_many(\@pairs, $jobs);
-        1;
-    };
-    if (!$ok) {
-        my $err = $@ || 'transaction db snapshot failed';
-        remove_tree($stage) if -d $stage;
-        die $err;
-    }
-
-    remove_tree($snap) if -d $snap;
-    rename $stage, $snap or die "rename $stage -> $snap: $!";
+    unlink $snap if -f $snap;
 }
 
 sub restore_db {
     my ($self, $tx) = @_;
     my $db_dir = $self->{cfg}->{db_dir};
-    my $snap = $tx->{db_snapshot_dir};
-    return if !-d $snap;
-    my $jobs = $self->_resolve_jobs();
-    my @pairs;
-    my $stage = File::Spec->catdir($tx->{dir}, 'db-restore-stage');
-    remove_tree($stage) if -d $stage;
-    ensure_dir($stage);
+    my $snap = File::Spec->catfile($tx->{db_snapshot_dir}, 'elpkg.sqlite');
+    my $dst = $self->_db_path();
 
-    for my $name (qw(installed.json files.json)) {
-        my $src = File::Spec->catfile($snap, $name);
-        my $dst = File::Spec->catfile($stage, $name);
-        push @pairs, [$src, $dst] if -f $src;
-        my $sum = $src . '.sha256';
-        push @pairs, [$sum, $dst . '.sha256'] if -f $sum;
+    ensure_dir($db_dir);
+    if (-f $snap) {
+        _copy_file($snap, $dst);
+    } elsif (-f $dst) {
+        unlink $dst;
     }
-
-    my $pkg_src = File::Spec->catdir($snap, 'packages');
-    my $pkg_dst = File::Spec->catdir($stage, 'packages');
-    if (-d $pkg_src) {
-        _collect_tree_pairs($pkg_src, $pkg_dst, \@pairs);
-    }
-
-    my $ok = eval {
-        $self->_copy_many(\@pairs, $jobs);
-        1;
-    };
-    if (!$ok) {
-        my $err = $@ || 'transaction db restore copy failed';
-        remove_tree($stage) if -d $stage;
-        die $err;
-    }
-
-    for my $name (qw(installed.json files.json)) {
-        my $staged = File::Spec->catfile($stage, $name);
-        my $dst = File::Spec->catfile($db_dir, $name);
-        if (-f $staged) {
-            _copy_file($staged, $dst);
-        } elsif (-f $dst) {
-            unlink $dst;
-        }
-
-        my $staged_sum = $staged . '.sha256';
-        my $dst_sum = $dst . '.sha256';
-        if (-f $staged_sum) {
-            _copy_file($staged_sum, $dst_sum);
-        } elsif (-f $dst_sum) {
-            unlink $dst_sum;
-        }
-    }
-
-    my $pkg_final = File::Spec->catdir($db_dir, 'packages');
-    my $pkg_stage = File::Spec->catdir($stage, 'packages');
-    my $pkg_backup = File::Spec->catdir($tx->{dir}, 'db-restore-packages-backup');
-    remove_tree($pkg_backup) if -d $pkg_backup;
-
-    if (-d $pkg_final) {
-        rename $pkg_final, $pkg_backup or die "rename $pkg_final -> $pkg_backup: $!";
-    }
-    if (-d $pkg_stage) {
-        if (!rename($pkg_stage, $pkg_final)) {
-            my $err = "rename $pkg_stage -> $pkg_final: $!";
-            if (-d $pkg_backup) {
-                rename $pkg_backup, $pkg_final;
-            }
-            remove_tree($stage) if -d $stage;
-            die $err;
-        }
-    }
-    remove_tree($pkg_backup) if -d $pkg_backup;
-    remove_tree($stage) if -d $stage;
 }
 
 sub rollback {
@@ -287,6 +230,53 @@ sub _collect_tree_pairs {
         }
     }
     closedir $dh;
+}
+
+sub _db_path {
+    my ($self) = @_;
+    return $self->{cfg}->{db_path}
+        || File::Spec->catfile($self->{cfg}->{db_dir}, 'elpkg.sqlite');
+}
+
+sub _tx_db_path {
+    my ($self, $dir) = @_;
+    return File::Spec->catfile($dir, 'tx.sqlite');
+}
+
+sub _connect_tx_db {
+    my ($self, $path) = @_;
+    ensure_dir(dirname($path));
+    my $dbh = DBI->connect(
+        'dbi:SQLite:dbname=' . $path,
+        '',
+        '',
+        {
+            AutoCommit => 1,
+            PrintError => 0,
+            RaiseError => 1,
+            sqlite_unicode => 1,
+        },
+    ) or die "failed to open transaction database $path";
+    $dbh->do('PRAGMA journal_mode = DELETE');
+    $dbh->do('PRAGMA synchronous = NORMAL');
+    $dbh->do('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    $dbh->do('CREATE TABLE IF NOT EXISTS added (seq INTEGER PRIMARY KEY, path TEXT NOT NULL)');
+    $dbh->do('CREATE TABLE IF NOT EXISTS backups (seq INTEGER PRIMARY KEY, path TEXT NOT NULL)');
+    return $dbh;
+}
+
+sub _store_array {
+    my ($self, $dbh, $table, $values) = @_;
+    my $sth = $dbh->prepare("INSERT INTO $table(seq, path) VALUES(?, ?)");
+    for my $i (0 .. $#$values) {
+        $sth->execute($i, $values->[$i]);
+    }
+}
+
+sub _load_array {
+    my ($self, $dbh, $table) = @_;
+    my $rows = $dbh->selectcol_arrayref("SELECT path FROM $table ORDER BY seq");
+    return $rows || [];
 }
 
 sub _move_preserve {

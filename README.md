@@ -10,7 +10,7 @@ for repo maintenance.
 - Package integrity via SHA256 and optional OpenSSL signatures.
 - Snapshot/restore for rollback.
 - Recipe-based builds to produce repo artifacts.
-- DB integrity checksums and `elpkg check` ownership verification.
+- SQLite-backed package state with `elpkg check` ownership verification.
 - Per-file content hashes with `elpkg verify` and optional repair.
 - Global install/remove hooks with allow/deny policies.
 - Optional script environment cleaning / non-root execution via config.
@@ -20,8 +20,9 @@ for repo maintenance.
 
 ## Layout
 - Config: `/etc/elpkg/elpkg.conf` (or `elpkg/etc/elpkg.conf` in this repo).
-- DB: `/var/lib/elpkg` (installed package records, file ownership, snapshots).
-- Cache: `/var/cache/elpkg` (repo index, packages, sources).
+- DB: `/var/lib/elpkg/elpkg.sqlite` by default, with snapshots and
+  transactions under `/var/lib/elpkg`.
+- Cache: `/var/cache/elpkg` (`pkg_summary.gz`, packages, sources, patch indexes).
 
 ## Common commands
 ```
@@ -46,16 +47,16 @@ elpkg verify --fix
 ```
 
 ## Repository format
-`index.json` contains a list of packages with fields:
-`name`, `version`, `release`, `arch`, `filename`, `sha256`, `size`, `deps`,
-`provides`, `conflicts`, `description`.
+The repository index is `pkg_summary.gz`, a gzip-compressed pkg_summary-style
+text file with package name, version, release, arch, filename, size, SHA256,
+dependency, provide, conflict, and description fields.
 
 To build a repo index from locally built packages:
 ```
 elpkg repo index /path/to/repo
 ```
-If `openssl_privkey` is set in the config, this will also create `index.json.sig`
-and per-package `*.sig` files in the repo directory.
+If `openssl_privkey` is set in the config, this will also create
+`pkg_summary.gz.sig` and per-package `*.sig` files in the repo directory.
 
 To build a patches index (for repo/patches):
 ```
@@ -106,7 +107,8 @@ The build system sets:
 ## Notes
 - For signed repos, place trusted public key(s) at `/etc/elpkg/trusted.pem`.
   Multiple keys can be comma-separated in `openssl_pubkey` for rotation.
-- DB checksums are written alongside DB files as `.sha256`.
+- `verify_db = true` runs SQLite `PRAGMA quick_check` before database reads.
+- Package archives store metadata in `meta/package.sqlite`.
 - Set `require_file_hashes = true` to enforce hashes for all installed packages.
 - Hook scripts live in `/etc/elpkg/hooks.d` and are executed by phase:
   - `/etc/elpkg/hooks.d/pre_install.d/*`
@@ -116,6 +118,7 @@ The build system sets:
   - or named with a `phase-` prefix in the base hooks dir.
   - `hooks_allowlist`/`hooks_denylist` control which scripts run.
 - Transaction journals live under `/var/lib/elpkg/transactions` by default.
+- Transaction state is stored in `tx.sqlite`; snapshots use `snapshot.sqlite`.
 - Set `auto_snapshot = true` to create a snapshot before installs/removes.
 - Use `--no-snapshot` to skip auto-snapshots for a single command.
 - Control transactions with `tx_enabled`, `tx_dir`, and `tx_keep` in `elpkg.conf`.

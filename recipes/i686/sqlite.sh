@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+
+pkgname="sqlite"
+pkgver="3.51.3"
+pkgrel=1
+arch=("i686")
+source=("https://www.sqlite.org/2026/sqlite-autoconf-3510300.tar.gz")
+sha256sums=("81f5be397049b0cae1b167f2225af7646fc0f82e4a9b3c48c9ea3a533e21d77a")
+depends=("glibc")
+
+makedepends=("bash" "binutils" "coreutils" "gcc" "glibc" "make")
+description="SQLite embedded SQL database engine"
+
+build() {
+cd $srcdir
+tar -xzf $srcdir/sqlite-autoconf-3510300.tar.gz
+cd $srcdir/sqlite-autoconf-3510300
+
+./configure --prefix=/usr    \
+            --disable-static \
+            --disable-readline
+
+make -j$(nproc)
+}
+
+package() {
+cd $srcdir/sqlite-autoconf-3510300
+
+make DESTDIR="$pkgdir" install
+}

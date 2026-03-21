@@ -7,9 +7,10 @@ use Cwd qw(abs_path getcwd);
 use File::Copy qw(copy);
 use File::Path qw(make_path);
 use File::Find qw(find);
+use Elpkg::PkgMeta qw(write_package_meta meta_db_relpath);
 use Elpkg::Util qw(
   ensure_dir run_cmd run_capture sha256_file download_file
-  json_write compression_ext temp_dir which_cmd
+  compression_ext temp_dir which_cmd
 );
 
 sub new {
@@ -191,7 +192,6 @@ sub build_recipe {
 
     my $meta_dir = File::Spec->catdir($pkgdir, 'meta');
     ensure_dir($meta_dir);
-    ensure_dir(File::Spec->catdir($meta_dir, 'scripts'));
 
     # per-file hashes for integrity checking
     my %hashes;
@@ -199,7 +199,6 @@ sub build_recipe {
         my $path = File::Spec->catfile($pkgdir, $rel);
         $hashes{$rel} = sha256_file($path);
     }
-    json_write(File::Spec->catfile($meta_dir, 'hashes.json'), \%hashes);
 
     my $manifest = {
         name => $pkgname,
@@ -212,22 +211,23 @@ sub build_recipe {
         description => $meta->{description} || '',
         build_date => time(),
     };
-    json_write(File::Spec->catfile($meta_dir, 'manifest.json'), $manifest);
-
-    open my $fl, '>', File::Spec->catfile($meta_dir, 'files.list') or die "write files.list: $!";
-    print {$fl} join("\n", @files), "\n";
-    close $fl;
+    my %scripts;
 
     for my $script (qw(pre_install post_install pre_remove post_remove)) {
         next if !$funcs->{$script};
-        my $path = File::Spec->catfile($meta_dir, 'scripts', $script);
-        open my $fh, '>', $path or die "write $path: $!";
-        print {$fh} "#!/bin/bash\nset -e\n";
-        print {$fh} $funcs->{$script};
-        print {$fh} "\n$script \"$pkgname\"\n";
-        close $fh;
-        chmod 0755, $path;
+        $scripts{$script} = "#!/bin/bash\nset -e\n$funcs->{$script}\n$script \"$pkgname\"\n";
     }
+
+    write_package_meta(
+        File::Spec->catfile($pkgdir, meta_db_relpath()),
+        {
+            manifest => $manifest,
+            files => \@files,
+            hashes => \%hashes,
+            config_files => [ grep { $_ =~ m{^etc/} } @files ],
+            scripts => \%scripts,
+        },
+    );
 
     my $ext = compression_ext();
     my $pkgfile = "$pkgname-$pkgver-$pkgrel-$self->{cfg}->{arch}.elpkg.tar.$ext";

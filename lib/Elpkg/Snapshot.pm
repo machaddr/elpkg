@@ -2,10 +2,11 @@ package Elpkg::Snapshot;
 
 use strict;
 use warnings;
+use DBI;
 use File::Spec;
-use File::Path qw(make_path remove_tree);
+use File::Path qw(remove_tree);
 use File::Basename qw(dirname);
-use Elpkg::Util qw(ensure_dir json_write json_read now_iso run_capture);
+use Elpkg::Util qw(ensure_dir run_capture);
 
 sub new {
     my ($class, $cfg, $db, $pkgmgr) = @_;
@@ -41,19 +42,12 @@ sub create {
     ensure_dir(File::Spec->catdir($dir, 'packages'));
 
     my $installed = $self->{db}->load_installed();
-    my $manifest = {
-        name => $name,
-        created_at => $ts,
-        arch => $self->{cfg}->{arch},
-        repo_base => $self->{cfg}->{repo_base},
-        packages => [],
-    };
-
+    my @packages;
     my @copy_pairs;
     my %seen_dst;
     for my $pkg (sort keys %{ $installed->{packages} }) {
         my $info = $installed->{packages}{$pkg};
-        push @{ $manifest->{packages} }, {
+        push @packages, {
             name => $pkg,
             version => $info->{version},
             release => $info->{release},
@@ -71,7 +65,16 @@ sub create {
     my $ok = eval {
         my $jobs = $self->_resolve_jobs();
         $self->_copy_many(\@copy_pairs, $jobs);
-        json_write(File::Spec->catfile($dir, 'snapshot.json'), $manifest);
+        $self->_write_snapshot_db(
+            File::Spec->catfile($dir, 'snapshot.sqlite'),
+            {
+                name => $name,
+                created_at => $ts,
+                arch => $self->{cfg}->{arch},
+                repo_base => $self->{cfg}->{repo_base},
+                packages => \@packages,
+            },
+        );
         1;
     };
     if (!$ok) {
@@ -87,8 +90,7 @@ sub restore {
     my ($self, $snap) = @_;
     my $dir = File::Spec->catdir($self->snapshot_dir(), $snap);
     die "snapshot not found: $snap" if !-d $dir;
-    my $manifest = json_read(File::Spec->catfile($dir, 'snapshot.json'))
-        or die "snapshot manifest missing: $snap";
+    my $manifest = $self->_read_snapshot_db(File::Spec->catfile($dir, 'snapshot.sqlite'));
 
     my %want = map { $_->{name} => $_ } @{ $manifest->{packages} || [] };
     my $installed = $self->{db}->load_installed();
@@ -109,11 +111,103 @@ sub restore {
                 next;
             }
         }
-        # fallback: install by name from repo
         $self->{pkgmgr}->install($pkg, { assume_yes => 1, upgrade => 1, jobs => $jobs });
     }
 
     return 1;
+}
+
+sub _write_snapshot_db {
+    my ($self, $path, $snapshot) = @_;
+    my $dbh = $self->_connect_snapshot_db($path);
+
+    $dbh->begin_work();
+    $dbh->do('DELETE FROM meta');
+    $dbh->do('DELETE FROM packages');
+
+    my $meta_sth = $dbh->prepare('INSERT INTO meta(key, value) VALUES(?, ?)');
+    for my $key (qw(name created_at arch repo_base)) {
+        my $value = $snapshot->{$key};
+        $value = '' if !defined $value;
+        $meta_sth->execute($key, $value);
+    }
+
+    my $pkg_sth = $dbh->prepare(
+        'INSERT INTO packages(seq, name, version, release, pkgfile) VALUES(?, ?, ?, ?, ?)'
+    );
+    my $packages = $snapshot->{packages} || [];
+    for my $i (0 .. $#$packages) {
+        my $pkg = $packages->[$i];
+        $pkg_sth->execute(
+            $i,
+            $pkg->{name} // '',
+            $pkg->{version} // '',
+            defined $pkg->{release} ? $pkg->{release} : 1,
+            $pkg->{pkgfile} // '',
+        );
+    }
+
+    $dbh->commit();
+    $dbh->disconnect();
+}
+
+sub _read_snapshot_db {
+    my ($self, $path) = @_;
+    die "snapshot manifest missing: $path" if !-f $path;
+    my $dbh = $self->_connect_snapshot_db($path);
+
+    my $rows = $dbh->selectall_arrayref('SELECT key, value FROM meta', { Slice => {} });
+    my %meta = map { $_->{key} => $_->{value} } @$rows;
+    my $pkg_rows = $dbh->selectall_arrayref(
+        'SELECT name, version, release, pkgfile FROM packages ORDER BY seq',
+        { Slice => {} },
+    );
+    my @packages = map {
+        +{
+            name => $_->{name},
+            version => $_->{version},
+            release => int($_->{release} // 1),
+            pkgfile => $_->{pkgfile},
+        }
+    } @$pkg_rows;
+
+    $dbh->disconnect();
+    return {
+        name => $meta{name} // '',
+        created_at => int($meta{created_at} // 0),
+        arch => $meta{arch} // '',
+        repo_base => $meta{repo_base} // '',
+        packages => \@packages,
+    };
+}
+
+sub _connect_snapshot_db {
+    my ($self, $path) = @_;
+    ensure_dir(dirname($path));
+    my $dbh = DBI->connect(
+        'dbi:SQLite:dbname=' . $path,
+        '',
+        '',
+        {
+            AutoCommit => 1,
+            PrintError => 0,
+            RaiseError => 1,
+            sqlite_unicode => 1,
+        },
+    ) or die "failed to open snapshot database $path";
+    $dbh->do('PRAGMA journal_mode = DELETE');
+    $dbh->do('PRAGMA synchronous = NORMAL');
+    $dbh->do('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    $dbh->do(
+        'CREATE TABLE IF NOT EXISTS packages (' .
+        'seq INTEGER PRIMARY KEY, ' .
+        'name TEXT NOT NULL, ' .
+        'version TEXT NOT NULL, ' .
+        'release INTEGER NOT NULL, ' .
+        'pkgfile TEXT' .
+        ')'
+    );
+    return $dbh;
 }
 
 sub _copy_many {

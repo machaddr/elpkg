@@ -7,8 +7,11 @@ use Getopt::Long qw(GetOptionsFromArray);
 use File::Spec;
 use Elpkg::Config;
 use Elpkg::Manager;
-use Elpkg::Util qw(json_write sha256_file openssl_sign ensure_dir);
-use JSON::PP;
+use Elpkg::PkgMeta qw(read_package_meta meta_db_relpath);
+use Elpkg::Summary qw(
+    write_pkg_summary write_patches_summary
+);
+use Elpkg::Util qw(sha256_file openssl_sign ensure_dir);
 
 sub main {
     my @argv = @ARGV;
@@ -89,7 +92,7 @@ sub main {
         if ($sub eq 'show') {
             my $id = shift @argv or die "tx show requires id\n";
             my $tx = $mgr->tx_show($id) or die "tx not found: $id\n";
-            print JSON::PP->new->canonical->pretty->encode($tx);
+            print format_tx($tx);
             exit 0;
         }
         if ($sub eq 'rollback') {
@@ -277,8 +280,8 @@ Commands:
   remove <name>        Remove package
   update               Upgrade all installed packages
   build <recipe>       Build package from recipe
-  repo index <dir>     Create repo index.json for a directory
-  repo patches-index <dir>  Create patches index.json for a directory
+  repo index <dir>     Create repo pkg_summary.gz for a directory
+  repo patches-index <dir>  Create patches_summary.gz for a directory
   patches sync         Sync patches from repo
   patches list         List patches from repo index
   snapshot list        List snapshots
@@ -312,16 +315,14 @@ sub repo_index {
         my $meta_dir = File::Spec->catdir($tmpdir, $file . '.meta');
         system('rm', '-rf', $meta_dir) if -d $meta_dir;
         ensure_dir($meta_dir);
-        my $ok = system('tar', '-xf', $path, '-C', $meta_dir, './meta') == 0;
+        my $meta_rel = meta_db_relpath();
+        my $ok = system('tar', '-xf', $path, '-C', $meta_dir, './' . $meta_rel) == 0;
         if (!$ok) {
-            $ok = system('tar', '-xf', $path, '-C', $meta_dir, 'meta') == 0;
+            $ok = system('tar', '-xf', $path, '-C', $meta_dir, $meta_rel) == 0;
         }
-        die "tar extract meta failed for $file" if !$ok;
-        my $manifest_path = File::Spec->catfile($meta_dir, 'meta', 'manifest.json');
-        open my $fh, '<', $manifest_path or die "read $manifest_path: $!";
-        local $/; my $raw = <$fh>; close $fh;
-        my $manifest = eval { JSON::PP->new->utf8->decode($raw) };
-        next if !$manifest;
+        die "tar extract package metadata failed for $file" if !$ok;
+        my $meta_db = File::Spec->catfile($meta_dir, $meta_rel);
+        my ($manifest) = read_package_meta($meta_db);
         my $sha = sha256_file($path);
         my $size = -s $path;
         $manifest->{filename} = $file;
@@ -338,12 +339,8 @@ sub repo_index {
         push @packages, $manifest;
     }
 
-    my $index = {
-        generated_at => time(),
-        packages => \@packages,
-    };
-    my $index_path = File::Spec->catfile($dir, 'index.json');
-    json_write($index_path, $index);
+    my $index_path = File::Spec->catfile($dir, 'pkg_summary.gz');
+    write_pkg_summary($index_path, \@packages);
     if ($cfg->{openssl_privkey}) {
         openssl_sign($index_path, $index_path . '.sig', $cfg->{openssl_privkey});
     }
@@ -367,15 +364,29 @@ sub patches_index {
         };
     }
 
-    my $index = {
-        generated_at => time(),
-        patches => \@patches,
-    };
-    my $index_path = File::Spec->catfile($dir, 'index.json');
-    json_write($index_path, $index);
+    my $index_path = File::Spec->catfile($dir, 'patches_summary.gz');
+    write_patches_summary($index_path, \@patches);
     if ($cfg->{openssl_privkey}) {
         openssl_sign($index_path, $index_path . '.sig', $cfg->{openssl_privkey});
     }
+}
+
+sub format_tx {
+    my ($tx) = @_;
+    my @lines;
+    for my $key (sort grep { !ref $tx->{$_} } keys %$tx) {
+        my $value = $tx->{$key};
+        $value = '' if !defined $value;
+        push @lines, "$key: $value";
+    }
+    for my $key (qw(added backups)) {
+        next if !exists $tx->{$key};
+        push @lines, "$key:";
+        for my $item (@{ $tx->{$key} || [] }) {
+            push @lines, "  $item";
+        }
+    }
+    return join("\n", @lines) . "\n";
 }
 
 main();

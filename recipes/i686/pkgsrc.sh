@@ -38,6 +38,8 @@ post_install() {
         --pkgdbdir=/usr/pkg/pkgdb \
         --varbase=/var
     )
+    find "$PKGSRC_DIR" -type d \( -name work -o -name 'work.*' -o -name .buildlink \) -prune -exec rm -rf {} +
+    find "$PKGSRC_DIR" -type f \( -name .work.log -o -name '*.core' \) -delete
   else
     echo "ERROR: pkgsrc bootstrap script not found at $PKGSRC_DIR/bootstrap." >&2
     return 1

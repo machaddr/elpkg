@@ -8,13 +8,12 @@ use File::Basename qw(dirname);
 use File::Temp qw(tempdir);
 use Digest::SHA qw(sha256_hex);
 use HTTP::Tiny;
-use JSON::PP;
 use Fcntl qw(:flock SEEK_SET);
 use Cwd qw(getcwd);
 use POSIX qw(strftime);
 
 our @EXPORT_OK = qw(
-  now_iso ensure_dir read_file write_file_atomic json_read json_write
+  now_iso ensure_dir read_file write_file_atomic
   run_cmd run_capture sha256_file download_file which_cmd is_root
   tar_supports_zstd tar_supports_flag compression_ext with_lock
   temp_dir openssl_sign openssl_verify
@@ -48,19 +47,6 @@ sub write_file_atomic {
     print {$fh} $data;
     close $fh or die "close $tmp: $!";
     rename $tmp, $path or die "rename $tmp -> $path: $!";
-}
-
-sub json_read {
-    my ($path) = @_;
-    return undef if !-f $path;
-    my $raw = read_file($path);
-    return JSON::PP->new->utf8->decode($raw);
-}
-
-sub json_write {
-    my ($path, $data) = @_;
-    my $json = JSON::PP->new->utf8->canonical->pretty->encode($data);
-    write_file_atomic($path, $json);
 }
 
 sub run_cmd {

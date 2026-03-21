@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use File::Spec;
 use Cwd qw(abs_path);
-use Elpkg::Util qw(read_file ensure_dir);
+use Elpkg::Util qw(read_file);
 
 sub default_config {
     my %cfg = (
@@ -12,6 +12,7 @@ sub default_config {
         repo_base => 'https://repo.somalinux.org/{$arch}',
         root => '/',
         db_dir => '/var/lib/elpkg',
+        db_path => '',
         cache_dir => '/var/cache/elpkg',
         source_cache_dir => '',
         log_dir => '/var/log/elpkg',
@@ -61,12 +62,19 @@ sub load {
     $cfg->{root} = $ENV{ELPKG_ROOT} if defined $ENV{ELPKG_ROOT};
     $cfg->{repo_base} = $ENV{ELPKG_REPO} if defined $ENV{ELPKG_REPO};
     $cfg->{arch} = $ENV{ELPKG_ARCH} if defined $ENV{ELPKG_ARCH};
+    $cfg->{db_path} = $ENV{ELPKG_DB_PATH} if defined $ENV{ELPKG_DB_PATH};
     $cfg->{verify_signatures} = 0 if defined $ENV{ELPKG_NO_VERIFY};
     $cfg->{source_cache_dir} = $ENV{ELPKG_SOURCE_CACHE} if defined $ENV{ELPKG_SOURCE_CACHE};
     if (defined $ENV{ELPKG_MAKE_JOBS} && $ENV{ELPKG_MAKE_JOBS} =~ /^\d+$/) {
         $cfg->{make_jobs} = int($ENV{ELPKG_MAKE_JOBS});
     } elsif (defined $ENV{SOMALINUX_MAKE_JOBS} && $ENV{SOMALINUX_MAKE_JOBS} =~ /^\d+$/) {
         $cfg->{make_jobs} = int($ENV{SOMALINUX_MAKE_JOBS});
+    }
+
+    if (!$cfg->{db_path} || $cfg->{db_path} eq '') {
+        $cfg->{db_path} = File::Spec->catfile($cfg->{db_dir}, 'elpkg.sqlite');
+    } elsif (!File::Spec->file_name_is_absolute($cfg->{db_path})) {
+        $cfg->{db_path} = File::Spec->catfile($cfg->{db_dir}, $cfg->{db_path});
     }
 
     if (!$cfg->{patches_dir} || $cfg->{patches_dir} eq '') {
