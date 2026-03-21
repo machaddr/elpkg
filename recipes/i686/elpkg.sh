@@ -2,34 +2,19 @@
 set -euo pipefail
 
 pkgname="elpkg"
-pkgver="0.3.1"
+pkgver="0.4.0"
 pkgrel=1
 arch=("i686")
-source=()
-sha256sums=()
+source=("https://github.com/machaddr/elpkg/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=("fccbe876f49ef2ce076fc6e11f329b710f2391d3ce5f575bce7790d38995df7d")
 depends=("dbd-sqlite" "dbi" "openssl" "perl" "sqlite" "tar" "xz" "zstd")
 makedepends=("make")
 description="SomaLinux package manager"
 
 build() {
-    local elpkg_src=""
-    local candidate
-
-    for candidate in /sources/elpkg "$(cd "$(dirname "$RECIPE_PATH")/../.." && pwd)"; do
-        if [[ -f "$candidate/Makefile" && -f "$candidate/bin/elpkg" ]]; then
-            elpkg_src="$candidate"
-            break
-        fi
-    done
-
-    if [[ -z "$elpkg_src" ]]; then
-        echo "ERROR: Could not find local elpkg source tree." >&2
-        return 1
-    fi
-
-    rm -rf "$srcdir/elpkg-$pkgver"
-    cp -a "$elpkg_src" "$srcdir/elpkg-$pkgver"
-    rm -rf "$srcdir/elpkg-$pkgver/.git"
+    cd "$srcdir"
+    rm -rf "elpkg-$pkgver"
+    tar -xzf "v${pkgver}.tar.gz"
 }
 
 package() {
