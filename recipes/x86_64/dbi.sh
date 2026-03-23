@@ -17,7 +17,7 @@ cd $srcdir
 tar -xf $srcdir/DBI-$pkgver.tgz
 cd $srcdir/DBI-$pkgver
 
-perl Makefile.PL
+perl Makefile.PL NO_PACKLIST=1 NO_PERLLOCAL=1
 
 make -j$(nproc)
 }
@@ -25,5 +25,5 @@ make -j$(nproc)
 package() {
 cd $srcdir/DBI-$pkgver
 
-make DESTDIR="$pkgdir" install
+make DESTDIR="$pkgdir" NO_PACKLIST=1 NO_PERLLOCAL=1 install
 }

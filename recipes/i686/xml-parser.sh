@@ -17,7 +17,7 @@ cd $srcdir
 tar -xzf $srcdir/XML-Parser-$pkgver.tar.gz
 cd $srcdir/XML-Parser-$pkgver
 
-perl Makefile.PL
+perl Makefile.PL NO_PACKLIST=1 NO_PERLLOCAL=1
 
 make -j$(nproc)
 }
@@ -25,5 +25,5 @@ make -j$(nproc)
 package() {
 cd $srcdir/XML-Parser-$pkgver
 
-make DESTDIR="$pkgdir" install
+make DESTDIR="$pkgdir" NO_PACKLIST=1 NO_PERLLOCAL=1 install
 }
