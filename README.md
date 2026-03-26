@@ -17,6 +17,7 @@ for repo maintenance.
 - Conflict handling with `--overwrite` and upgrade/reinstall options.
 - Transaction journal with rollback and optional auto-snapshots.
 - Dependency constraints and virtual provides/conflicts.
+- Automatic refresh of installed Perl XS packages after Perl upgrades.
 
 ## Layout
 - Config: `/etc/elpkg/elpkg.conf` (or `elpkg/etc/elpkg.conf` in this repo).

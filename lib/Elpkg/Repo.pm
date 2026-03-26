@@ -190,7 +190,17 @@ sub download_package {
     my $url = "$base/$filename";
     my $dest = File::Spec->catfile($self->{cfg}->{cache_dir}, 'packages', $filename);
     ensure_dir(File::Spec->catdir($self->{cfg}->{cache_dir}, 'packages'));
-    if (!-f $dest) {
+
+    my $needs_download = !-f $dest;
+    if (!$needs_download && $pkg->{sha256}) {
+        my $sum = sha256_file($dest);
+        if ($sum ne $pkg->{sha256}) {
+            unlink $dest or die "remove stale cached package $dest: $!";
+            $needs_download = 1;
+        }
+    }
+
+    if ($needs_download) {
         download_file($url, $dest);
     }
     if ($pkg->{sha256}) {

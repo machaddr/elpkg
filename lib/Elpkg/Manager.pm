@@ -69,12 +69,13 @@ sub install {
     $self->_maybe_snapshot("install-$name", $opts);
     my $reinstall = $opts->{reinstall} || 0;
     my $installed = $self->{db}->load_installed();
-    my %installed_info;
-    for my $pkgname (keys %{ $installed->{packages} }) {
-        my $pkg = $self->{db}->get_pkg($pkgname);
-        my $manifest = $pkg && $pkg->{manifest} ? $pkg->{manifest} : { name => $pkgname };
-        $installed_info{$pkgname} = $manifest;
-    }
+    my %installed_info = %{ $self->_installed_manifest_map() };
+
+    my $perl_refresh = $self->_prepare_perl_runtime_refresh(
+        $name,
+        \%installed_info,
+        $opts,
+    );
 
     my $order = $self->{repo}->resolve_deps([$name], \%installed_info);
     my %entries = map { $_ => $self->{repo}->find_package($_) } @$order;
@@ -126,6 +127,8 @@ sub install {
             jobs => $opts->{jobs},
         });
     }
+
+    $self->_refresh_perl_runtime($perl_refresh, $opts);
     return 1;
 }
 
@@ -134,7 +137,17 @@ sub install_pkgfile {
     $opts ||= {};
     _require_root($self, $opts);
     $self->_maybe_snapshot('install-pkgfile', $opts);
-    return $self->{pkg}->install_pkg_file($pkgfile, $opts);
+    my $manifest = $self->{pkg}->read_pkg_manifest($pkgfile, $opts);
+    my %installed_info = %{ $self->_installed_manifest_map() };
+    my $perl_refresh = $self->_prepare_perl_runtime_refresh(
+        $manifest->{name} || '',
+        \%installed_info,
+        $opts,
+    );
+
+    my $result = $self->{pkg}->install_pkg_file($pkgfile, $opts);
+    $self->_refresh_perl_runtime($perl_refresh, $opts);
+    return $result;
 }
 
 sub remove {
@@ -156,8 +169,11 @@ sub update_all {
     _require_root($self, $opts);
     $self->_maybe_snapshot('update-all', $opts);
     my $installed = $self->{db}->load_installed();
-    for my $name (sort keys %{ $installed->{packages} }) {
-        my $current = $installed->{packages}{$name};
+    my @names = @{ $self->_perl_update_order($installed->{packages}) };
+    for my $name (@names) {
+        my $current_state = $self->{db}->load_installed();
+        my $current = $current_state->{packages}{$name};
+        next if !$current;
         my $repo = $self->{repo}->find_package($name);
         next if !$repo;
         my $cmp = cmp_version($repo->{version}, $current->{version});
@@ -314,6 +330,130 @@ sub _require_root {
     my ($self, $opts) = @_;
     return if $opts->{root} && $opts->{root} ne '/';
     die "elpkg must be run as root for install/remove" if !is_root();
+}
+
+sub _prepare_perl_runtime_refresh {
+    my ($self, $target_name, $installed_info, $opts) = @_;
+    return undef if $target_name ne 'perl';
+    return undef if !$installed_info->{perl};
+    return undef if !$opts->{upgrade} && !$opts->{reinstall};
+
+    my $followers = $self->_installed_perl_xs_packages($installed_info);
+    return undef if !@$followers;
+
+    my %installed_without_followers = %$installed_info;
+    delete @installed_without_followers{@$followers};
+
+    my $order = $self->{repo}->resolve_deps($followers, \%installed_without_followers);
+    my %wanted = map { $_ => 1 } @$followers;
+    my @refresh_order = grep { $wanted{$_} } @$order;
+    my %entries;
+
+    for my $pkgname (@refresh_order) {
+        my $entry = $self->{repo}->find_package($pkgname);
+        die "perl upgrade requires refreshed package not found in repo: $pkgname\n"
+            if !$entry;
+
+        my $current = $installed_info->{$pkgname} || {};
+        my $cmp = cmp_version($entry->{version}, $current->{version} // '0');
+        my $current_release = $current->{release} // 1;
+        my $repo_release = $entry->{release} // 1;
+        my $older = ($cmp < 0) || ($cmp == 0 && $repo_release < $current_release);
+        if ($older && !$self->{cfg}->{allow_downgrade}) {
+            die "perl upgrade requires refreshed package $pkgname, but repo only offers " .
+                "$entry->{version}-$repo_release while installed is $current->{version}-$current_release\n";
+        }
+
+        $entries{$pkgname} = $entry;
+    }
+
+    return {
+        packages => \@refresh_order,
+        entries => \%entries,
+    };
+}
+
+sub _installed_manifest_map {
+    my ($self) = @_;
+    my $installed = $self->{db}->load_installed();
+    my %installed_info;
+
+    for my $pkgname (keys %{ $installed->{packages} || {} }) {
+        my $pkg = $self->{db}->get_pkg($pkgname);
+        my $manifest = $pkg && $pkg->{manifest} ? $pkg->{manifest} : { name => $pkgname };
+        $installed_info{$pkgname} = $manifest;
+    }
+
+    return \%installed_info;
+}
+
+sub _refresh_perl_runtime {
+    my ($self, $plan, $opts) = @_;
+    return 1 if !$plan || !@{ $plan->{packages} || [] };
+
+    print "refreshing Perl XS packages after Perl upgrade: ",
+        join(', ', @{ $plan->{packages} }), "\n";
+
+    for my $pkgname (@{ $plan->{packages} }) {
+        my $entry = $plan->{entries}{$pkgname}
+            or die "missing perl runtime refresh entry for $pkgname";
+        my $pkgfile = $self->{repo}->download_package($entry);
+        $self->{pkg}->install_pkg_file($pkgfile, {
+            root => $opts->{root},
+            overwrite => $opts->{overwrite},
+            upgrade => 1,
+            reinstall => 1,
+            jobs => $opts->{jobs},
+        });
+    }
+
+    return 1;
+}
+
+sub _installed_perl_xs_packages {
+    my ($self, $installed_info) = @_;
+    my @packages;
+
+    for my $pkgname (sort keys %$installed_info) {
+        next if $pkgname eq 'perl';
+        my $pkg = $self->{db}->get_pkg($pkgname);
+        next if !$pkg;
+        next if !_pkg_has_perl_xs($pkg);
+        push @packages, $pkgname;
+    }
+
+    return \@packages;
+}
+
+sub _pkg_has_perl_xs {
+    my ($pkg) = @_;
+    for my $rel (@{ $pkg->{files} || [] }) {
+        return 1 if $rel =~ m{^usr/lib(?:64)?/perl5/(?:site_perl|vendor_perl|core_perl)/.*\.(?:so|bundle|dll)$};
+    }
+    return 0;
+}
+
+sub _perl_update_order {
+    my ($self, $installed_pkgs) = @_;
+    my @names = sort keys %{ $installed_pkgs || {} };
+    return \@names if !grep { $_ eq 'perl' } @names;
+
+    my $followers = $self->_installed_perl_xs_packages($installed_pkgs);
+    my %follower = map { $_ => 1 } @$followers;
+
+    @names = sort {
+        _perl_update_rank($a, \%follower) <=> _perl_update_rank($b, \%follower)
+            || $a cmp $b
+    } @names;
+
+    return \@names;
+}
+
+sub _perl_update_rank {
+    my ($name, $followers) = @_;
+    return 0 if $name eq 'perl';
+    return 2 if $followers->{$name};
+    return 1;
 }
 
 1;

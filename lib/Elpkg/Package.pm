@@ -152,6 +152,16 @@ sub install_pkg_file {
     });
 }
 
+sub read_pkg_manifest {
+    my ($self, $pkgfile, $opts) = @_;
+    $opts ||= {};
+    my $jobs = $self->_resolve_make_jobs($opts);
+    my $tmp_base = File::Spec->catdir($self->{cfg}->{tmp_dir}, 'inspect');
+    my $tmp = temp_dir($tmp_base);
+    my ($manifest) = $self->_read_meta($pkgfile, $tmp, $jobs);
+    return $manifest;
+}
+
 sub remove_pkg {
     my ($self, $name, $opts) = @_;
     $opts ||= {};
