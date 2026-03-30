@@ -2,20 +2,20 @@
 set -euo pipefail
 
 pkgname="linux-kernel"
-pkgver="6.12.65"
+pkgver="6.18.20"
 pkgrel=1
 arch=("i686")
-source=("https://linux-libre.fsfla.org/pub/linux-libre/releases/6.12.65-gnu/linux-libre-6.12.65-gnu.tar.xz")
-sha256sums=("eb1af14e303c40de0b00fd869f392538ebd2055dd8dd4ec05c0ba3301a8eac14")
+source=("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.20.tar.xz")
+sha256sums=("837a5abd98e46078a0ae1400e2daad89ece45cc3209037b09c2265dab2393553")
 depends=()
 makedepends=("bash" "bc" "binutils" "coreutils" "gcc" "make" "perl")
-description="Generic bootable Linux-libre kernel for SomaLinux live media"
+description="Generic bootable vanilla Linux kernel for SomaLinux live media"
 
 build() {
     local kernel_arch="i386"
 
     cd "$srcdir"
-    tar -xf "$srcdir/linux-libre-$pkgver-gnu.tar.xz"
+    tar -xf "$srcdir/linux-$pkgver.tar.xz"
     cd "$srcdir/linux-$pkgver"
 
     make ARCH="$kernel_arch" mrproper
@@ -218,6 +218,6 @@ package() {
     ln -sf "System.map-$kver" "$pkgdir/boot/System.map"
     ln -sf "config-$kver" "$pkgdir/boot/config"
 
-    install -dm755 "$pkgdir/usr/share/doc/linux-libre-$pkgver"
-    cp -a Documentation/* "$pkgdir/usr/share/doc/linux-libre-$pkgver/"
+    install -dm755 "$pkgdir/usr/share/doc/linux-$pkgver"
+    cp -a Documentation/* "$pkgdir/usr/share/doc/linux-$pkgver/"
 }
