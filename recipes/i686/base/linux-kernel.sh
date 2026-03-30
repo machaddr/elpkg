@@ -3,7 +3,7 @@ set -euo pipefail
 
 pkgname="linux-kernel"
 pkgver="6.18.20"
-pkgrel=1
+pkgrel=2
 arch=("i686")
 source=("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.20.tar.xz")
 sha256sums=("837a5abd98e46078a0ae1400e2daad89ece45cc3209037b09c2265dab2393553")
@@ -57,10 +57,15 @@ build() {
             -e BPF_SYSCALL \
             -e SECCOMP \
             -e SECCOMP_FILTER \
+            -e NETFILTER \
+            -e NETFILTER_ADVANCED \
+            -e VIRTUALIZATION \
+            -e IOMMU_SUPPORT \
             -e EFI \
             -e EFI_STUB \
             -e EFI_PARTITION \
             -e EFIVAR_FS \
+            -e INTEL_IOMMU \
             -e SYSFB_SIMPLEFB \
             -e DRM \
             -e DRM_KMS_HELPER \
@@ -279,6 +284,64 @@ build() {
             -m LIBERTAS_SDIO \
             -m LIBERTAS_USB \
             -m VIRTIO_FS
+
+        ./scripts/config --file .config \
+            -m BLK_DEV_LOOP \
+            -m BLK_DEV_NBD \
+            -m ZRAM \
+            -e ZRAM_BACKEND_ZSTD \
+            -m NF_CONNTRACK \
+            -m NF_NAT \
+            -m NF_TABLES \
+            -m NFT_CT \
+            -m NFT_MASQ \
+            -m NFT_REDIR \
+            -m IP_NF_IPTABLES \
+            -m IP_NF_FILTER \
+            -m IP_NF_NAT \
+            -m IP6_NF_IPTABLES \
+            -m IP6_NF_FILTER \
+            -m IP6_NF_NAT \
+            -m NETFILTER_XT_MATCH_CONNTRACK \
+            -m NETFILTER_XT_TARGET_MASQUERADE \
+            -m VETH \
+            -m MACVLAN \
+            -m MACVTAP \
+            -m IPVLAN \
+            -m IPVTAP \
+            -m VXLAN \
+            -m WIREGUARD \
+            -m BT \
+            -m BT_HCIBTUSB \
+            -m BT_INTEL \
+            -m BT_BCM \
+            -m BT_RTL \
+            -m BT_MTK \
+            -m USB_SERIAL \
+            -m USB_SERIAL_CH341 \
+            -m USB_SERIAL_CP210X \
+            -m USB_SERIAL_FTDI_SIO \
+            -m USB_SERIAL_PL2303 \
+            -m USB_SERIAL_OPTION \
+            -e MEDIA_SUPPORT \
+            -e MEDIA_CAMERA_SUPPORT \
+            -m USB_VIDEO_CLASS \
+            -m HID_MULTITOUCH \
+            -m HID_WACOM \
+            -m AUTOFS_FS \
+            -m CIFS \
+            -m NET_9P \
+            -m NET_9P_VIRTIO \
+            -m 9P_FS \
+            -m 9P_FS_POSIX_ACL \
+            -m KVM \
+            -m KVM_INTEL \
+            -m KVM_AMD \
+            -m VHOST_NET \
+            -m VHOST_VSOCK \
+            -m VFIO \
+            -m VFIO_PCI_CORE \
+            -m VFIO_PCI
     fi
 
     make ARCH="$kernel_arch" olddefconfig
