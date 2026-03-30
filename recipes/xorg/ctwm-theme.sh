@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-pkgname="netbsd-ctwm-theme"
+pkgname="ctwm-theme"
 pkgver="1.0"
-pkgrel=1
+pkgrel=2
 arch=("x86_64" "i686")
 source=()
 sha256sums=()
@@ -379,7 +379,7 @@ UXTerm*borderWidth: 1
 UXTerm*VT100*font: 9x15
 EOF_XRES
 
-    cat > "$pkgdir/etc/X11/xinit/xinitrc" <<'EOF_XINIT'
+    cat > "$pkgdir/etc/X11/xinit/xinitrc.somalinux-netbsd" <<'EOF_XINIT'
 #!/bin/sh
 
 userresources=$HOME/.Xresources
@@ -402,7 +402,13 @@ xset b off
 
 exec ctwm
 EOF_XINIT
-    chmod 755 "$pkgdir/etc/X11/xinit/xinitrc"
+    chmod 755 "$pkgdir/etc/X11/xinit/xinitrc.somalinux-netbsd"
+
+    cat > "$pkgdir/root/.xinitrc" <<'EOF_ROOT_XINITRC'
+#!/bin/sh
+exec /etc/X11/xinit/xinitrc.somalinux-netbsd
+EOF_ROOT_XINITRC
+    chmod 755 "$pkgdir/root/.xinitrc"
 
     cat > "$pkgdir/root/.bash_profile" <<'EOF_BASH_PROFILE'
 if [ -z "${DISPLAY:-}" ] && [ -r /proc/cmdline ] && [ -x /usr/bin/startx ]; then
@@ -428,7 +434,8 @@ Graphical boot entry:
 Installed defaults:
   /etc/X11/ctwm/system.ctwmrc
   /etc/X11/Xresources/somalinux-netbsd
-  /etc/X11/xinit/xinitrc
+  /etc/X11/xinit/xinitrc.somalinux-netbsd
+  /root/.xinitrc
   /root/.bash_profile
 EOF_README
 }

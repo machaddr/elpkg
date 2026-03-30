@@ -27,13 +27,39 @@ xcb_utility_packages=(
     "xcb-util-errors-1.0.1"
 )
 
+prune_libtool_archives() {
+    local root="$1"
+    local dir
+
+    for dir in "$root/usr/lib" "$root/usr/lib64" "$root/usr/libexec"; do
+        [[ -d "$dir" ]] || continue
+        find "$dir" -type f -name '*.la' -delete
+    done
+}
+
 build() {
     local package
+    local bootstrap_root="$builddir/bootstrap"
+    local bootstrap_prefix="$bootstrap_root/usr"
 
     cd "$srcdir"
     for package in "${xcb_utility_packages[@]}"; do
         tar -xf "$srcdir/$package.tar.xz"
     done
+
+    mkdir -p \
+        "$bootstrap_prefix/bin" \
+        "$bootstrap_prefix/include" \
+        "$bootstrap_prefix/lib" \
+        "$bootstrap_prefix/lib64" \
+        "$bootstrap_prefix/share/aclocal"
+
+    export PKG_CONFIG_PATH="$bootstrap_prefix/lib/pkgconfig:$bootstrap_prefix/lib64/pkgconfig:$bootstrap_prefix/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    export CPPFLAGS="-I$bootstrap_prefix/include${CPPFLAGS:+ $CPPFLAGS}"
+    export LDFLAGS="-L$bootstrap_prefix/lib -L$bootstrap_prefix/lib64${LDFLAGS:+ $LDFLAGS}"
+    export LD_LIBRARY_PATH="$bootstrap_prefix/lib:$bootstrap_prefix/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export ACLOCAL_PATH="$bootstrap_prefix/share/aclocal${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
+    export PATH="$bootstrap_prefix/bin:$PATH"
 
     for package in "${xcb_utility_packages[@]}"; do
         cd "$srcdir/$package"
@@ -43,6 +69,8 @@ build() {
             --localstatedir=/var \
             --disable-static
         make -j"$(nproc)"
+        make DESTDIR="$bootstrap_root" install
+        prune_libtool_archives "$bootstrap_root"
     done
 }
 
@@ -53,4 +81,6 @@ package() {
         cd "$srcdir/$package"
         make DESTDIR="$pkgdir" install
     done
+
+    prune_libtool_archives "$pkgdir"
 }

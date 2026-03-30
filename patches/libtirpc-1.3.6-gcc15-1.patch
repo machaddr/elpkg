@@ -1,0 +1,86 @@
+Submitted By:            SomaLinux
+Date:                    2026-03-30
+Initial Package Version: 1.3.6
+Upstream Status:         Backport of upstream libtirpc-devel fixes later
+                         committed for the 1.3.7 release candidate series.
+Origin:                  https://sourceforge.net/p/libtirpc/mailman/message/58851697/
+                         https://sourceforge.net/p/libtirpc/mailman/message/59111996/
+Description:             Fix GCC 15 / C23 build failures caused by
+                         old-style declarations being treated as
+                         zero-argument prototypes.
+
+diff -urN a/src/auth_none.c b/src/auth_none.c
+--- a/src/auth_none.c	2024-10-17 08:50:55.000000000 +0100
++++ b/src/auth_none.c	2026-03-30 17:58:56.970349732 +0100
+@@ -62,7 +62,7 @@
+ static bool_t authnone_refresh (AUTH *, void *);
+ static void authnone_destroy (AUTH *);
+ 
+-extern bool_t xdr_opaque_auth();
++extern bool_t xdr_opaque_auth(XDR *, struct opaque_auth *);
+ 
+ static struct auth_ops *authnone_ops();
+ 
+diff -urN a/src/auth_time.c b/src/auth_time.c
+--- a/src/auth_time.c	2024-10-17 08:50:55.000000000 +0100
++++ b/src/auth_time.c	2026-03-30 17:58:56.977252222 +0100
+@@ -248,7 +248,7 @@
+ 	char			ut[64], ipuaddr[64];
+ 	endpoint		teps[32];
+ 	nis_server		tsrv;
+-	void			(*oldsig)() = NULL; /* old alarm handler */
++	void			(*oldsig)(int) = NULL; /* old alarm handler */
+ 	struct sockaddr_in	sin;
+ 	int			s = RPC_ANYSOCK;
+ 	socklen_t len;
+@@ -417,7 +417,7 @@
+ 		} else {
+ 			int res;
+ 
+-			oldsig = (void (*)())signal(SIGALRM, alarm_hndler);
++			oldsig = (void (*)(int))signal(SIGALRM, alarm_hndler);
+ 			saw_alarm = 0; /* global tracking the alarm */
+ 			alarm(20); /* only wait 20 seconds */
+ 			res = connect(s, (struct sockaddr *)&sin, sizeof(sin));
+diff -urN a/src/getpublickey.c b/src/getpublickey.c
+--- a/src/getpublickey.c	2024-10-17 08:50:55.000000000 +0100
++++ b/src/getpublickey.c	2026-03-30 17:58:56.971923689 +0100
+@@ -52,7 +52,7 @@
+ /*
+  * Hack to let ypserv/rpc.nisd use AUTH_DES.
+  */
+-int (*__getpublickey_LOCAL)() = 0;
++int (*__getpublickey_LOCAL)(const char *, char *) = 0;
+ 
+ /*
+  * Get somebody's public key
+diff -urN a/src/key_call.c b/src/key_call.c
+--- a/src/key_call.c	2024-10-17 08:50:55.000000000 +0100
++++ b/src/key_call.c	2026-03-30 17:58:56.982565416 +0100
+@@ -72,9 +72,9 @@
+  * implementations of these functions, and to call those in key_call().
+  */
+ 
+-cryptkeyres *(*__key_encryptsession_pk_LOCAL)() = 0;
+-cryptkeyres *(*__key_decryptsession_pk_LOCAL)() = 0;
+-des_block *(*__key_gendes_LOCAL)() = 0;
++cryptkeyres *(*__key_encryptsession_pk_LOCAL)(uid_t, char *) = 0;
++cryptkeyres *(*__key_decryptsession_pk_LOCAL)(uid_t, char *) = 0;
++des_block *(*__key_gendes_LOCAL)(uid_t, char *) = 0;
+ 
+ static int key_call( u_long, xdrproc_t, void *, xdrproc_t, void *);
+ 
+diff -urN a/src/svc_auth_none.c b/src/svc_auth_none.c
+--- a/src/svc_auth_none.c	2024-10-17 08:50:55.000000000 +0100
++++ b/src/svc_auth_none.c	2026-03-30 17:58:56.974791432 +0100
+@@ -37,8 +37,8 @@
+ 
+ #include <rpc/rpc.h>
+ 
+-static bool_t	svcauth_none_destroy();
+-static bool_t   svcauth_none_wrap();
++static bool_t	svcauth_none_destroy(SVCAUTH *);
++static bool_t   svcauth_none_wrap(SVCAUTH *, XDR *, bool_t (*)(XDR *, ...), char *);
+ 
+ struct svc_auth_ops svc_auth_none_ops = {
+ 	svcauth_none_wrap,

@@ -22,10 +22,10 @@ build() {
         --prefix=/usr \
         --buildtype=release \
         -D platforms=x11 \
-        -D gallium-drivers=auto \
-        -D vulkan-drivers=auto \
-        -D valgrind=disabled \
-        -D video-codecs=all
+        -D gallium-drivers=softpipe \
+        -D vulkan-drivers= \
+        -D glvnd=disabled \
+        -D valgrind=disabled
     ninja
 }
 
