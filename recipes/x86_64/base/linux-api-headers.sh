@@ -2,11 +2,11 @@
 set -euo pipefail
 
 pkgname="linux-api-headers"
-pkgver="6.12.65"
+pkgver="6.18.20"
 pkgrel=1
 arch=("x86_64")
-source=("https://linux-libre.fsfla.org/pub/linux-libre/releases/6.12.65-gnu/linux-libre-6.12.65-gnu.tar.xz")
-sha256sums=("eb1af14e303c40de0b00fd869f392538ebd2055dd8dd4ec05c0ba3301a8eac14")
+source=("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.20.tar.xz")
+sha256sums=("837a5abd98e46078a0ae1400e2daad89ece45cc3209037b09c2265dab2393553")
 depends=()
 
 makedepends=("bash" "coreutils" "gcc" "make")
@@ -15,7 +15,7 @@ description="linux api headers"
 build() {
 cd $srcdir
 
-tar -xvf $srcdir/linux-libre-$pkgver-gnu.tar.xz
+tar -xvf $srcdir/linux-$pkgver.tar.xz
 cd $srcdir/linux-$pkgver
 
 local kernel_arch="x86_64"

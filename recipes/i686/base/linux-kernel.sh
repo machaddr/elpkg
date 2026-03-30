@@ -83,16 +83,39 @@ build() {
             -e KEYBOARD_ATKBD \
             -e MOUSE_PS2 \
             -e NET \
+            -e NETDEVICES \
+            -e ETHERNET \
+            -e PHYLIB \
+            -e MII \
+            -e NET_VENDOR_3COM \
+            -e NET_VENDOR_ATHEROS \
+            -e NET_VENDOR_BROADCOM \
+            -e NET_VENDOR_INTEL \
+            -e NET_VENDOR_MARVELL \
+            -e NET_VENDOR_NVIDIA \
+            -e NET_VENDOR_REALTEK \
+            -e NET_VENDOR_SIS \
+            -e NET_VENDOR_VIA \
             -e PACKET \
             -e UNIX \
             -e INET \
             -e IPV6 \
+            -e WIRELESS \
+            -e WLAN \
+            -e WLAN_VENDOR_ATH \
+            -e WLAN_VENDOR_BROADCOM \
+            -e WLAN_VENDOR_INTEL \
+            -e WLAN_VENDOR_MARVELL \
+            -e WLAN_VENDOR_RALINK \
+            -e WLAN_VENDOR_REALTEK \
             -e PCI \
             -e SCSI \
             -e BLK_DEV_SD \
             -e ATA \
             -e VIRTIO \
             -e MD \
+            -e FW_LOADER \
+            -e FW_CACHE \
             -e SOUND \
             -e EXT4_FS \
             -e ISO9660_FS \
@@ -120,14 +143,43 @@ build() {
             -m MMC_SDHCI \
             -m MMC_SDHCI_PCI \
             -m MMC_SDHCI_ACPI \
+            -m E100 \
             -m E1000 \
             -m E1000E \
             -m IGB \
+            -m IGBVF \
             -m IXGBE \
+            -m ATL1 \
+            -m ATL1C \
+            -m ATL1E \
+            -m ALX \
+            -m 8139CP \
+            -m 8139TOO \
+            -m B44 \
+            -m BNX2 \
+            -m FORCEDETH \
             -m PCNET32 \
             -m R8169 \
+            -m SIS900 \
+            -m SKGE \
+            -m SKY2 \
             -m TIGON3 \
+            -m VIA_RHINE \
+            -m VIA_VELOCITY \
             -m VMXNET3 \
+            -m USB_USBNET \
+            -m USB_NET_AX8817X \
+            -m USB_NET_AX88179_178A \
+            -m USB_NET_CDCETHER \
+            -m USB_NET_CDC_EEM \
+            -m USB_NET_CDC_MBIM \
+            -m USB_NET_CDC_NCM \
+            -m USB_NET_QMI_WWAN \
+            -m USB_NET_RNDIS_HOST \
+            -m USB_NET_SMSC75XX \
+            -m USB_NET_SMSC95XX \
+            -m USB_RTL8150 \
+            -m USB_RTL8152 \
             -m TUN \
             -m BRIDGE \
             -m VLAN_8021Q \
@@ -162,6 +214,17 @@ build() {
             -m DRM_NOUVEAU \
             -m SND \
             -m SND_HDA_INTEL \
+            -m SND_HDA_GENERIC \
+            -m SND_HDA_CODEC_REALTEK \
+            -m SND_HDA_CODEC_HDMI \
+            -m SND_HDA_CODEC_CONEXANT \
+            -m SND_HDA_CODEC_SIGMATEL \
+            -m SND_HDA_CODEC_VIA \
+            -m SND_HDA_CODEC_CIRRUS \
+            -m SND_HDA_CODEC_CA0110 \
+            -m SND_HDA_CODEC_CA0132 \
+            -m SND_HDA_CODEC_CMEDIA \
+            -m SND_HDA_CODEC_SI3054 \
             -m SND_USB_AUDIO \
             -m BTRFS_FS \
             -m F2FS_FS \
@@ -185,9 +248,36 @@ build() {
             -m MD_RAID1 \
             -m MD_RAID10 \
             -m MD_RAID456 \
+            -m BCMA \
+            -m SSB \
             -m CFG80211 \
             -m MAC80211 \
             -m RFKILL \
+            -m IWLWIFI \
+            -m IWLDVM \
+            -m IWLMVM \
+            -m ATH5K \
+            -m ATH9K \
+            -m ATH9K_HTC \
+            -m ATH10K \
+            -m ATH10K_PCI \
+            -m B43 \
+            -m B43LEGACY \
+            -m BRCMSMAC \
+            -m BRCMFMAC \
+            -m RT2800PCI \
+            -m RT2800USB \
+            -m RTL8187 \
+            -m RTL8XXXU \
+            -m RTLWIFI \
+            -m RTLWIFI_PCI \
+            -m RTLWIFI_USB \
+            -m MWIFIEX \
+            -m MWIFIEX_PCIE \
+            -m MWIFIEX_USB \
+            -m LIBERTAS \
+            -m LIBERTAS_SDIO \
+            -m LIBERTAS_USB \
             -m VIRTIO_FS
     fi
 
