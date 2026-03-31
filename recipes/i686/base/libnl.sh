@@ -2,11 +2,11 @@
 set -euo pipefail
 
 pkgname="libnl"
-pkgver="3.2.25"
+pkgver="3.12.0"
 pkgrel=1
 arch=("i686")
-source=("https://www.infradead.org/~tgr/libnl/files/libnl-$pkgver.tar.gz")
-sha256sums=("8beb7590674957b931de6b7f81c530b85dc7c1ad8fbda015398bc1e8d1ce8ec5")
+source=("https://github.com/thom311/libnl/releases/download/libnl${pkgver//./_}/libnl-$pkgver.tar.gz")
+sha256sums=("fc51ca7196f1a3f5fdf6ffd3864b50f4f9c02333be28be4eeca057e103c0dd18")
 depends=("glibc")
 makedepends=("bash" "gcc" "make")
 description="Netlink protocol library suite"
@@ -20,7 +20,7 @@ cd "$srcdir/libnl-$pkgver"
             --sysconfdir=/etc \
             --disable-static
 
-make -j"$(nproc)"
+make
 }
 
 package() {
