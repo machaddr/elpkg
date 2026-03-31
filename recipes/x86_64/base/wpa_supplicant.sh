@@ -3,7 +3,7 @@ set -euo pipefail
 
 pkgname="wpa_supplicant"
 pkgver="2.11"
-pkgrel=2
+pkgrel=3
 arch=("x86_64")
 source=("https://w1.fi/releases/wpa_supplicant-$pkgver.tar.gz")
 sha256sums=("912ea06f74e30a8e36fbb68064d6cdff218d8d591db0fc5d75dee6c81ac7fc0a")
@@ -15,6 +15,7 @@ build() {
 cd "$srcdir"
 tar -xzf "$srcdir/wpa_supplicant-$pkgver.tar.gz"
 cd "$srcdir/wpa_supplicant-$pkgver"
+patch -Np1 -i "$patchdir/wpa_supplicant-$pkgver-libnl_s8_compat-1.patch"
 
 cat > wpa_supplicant/.config <<'EOF'
 CONFIG_BACKEND=file

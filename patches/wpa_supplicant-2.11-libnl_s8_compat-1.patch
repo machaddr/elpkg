@@ -1,0 +1,22 @@
+diff --git a/src/drivers/driver_nl80211.c b/src/drivers/driver_nl80211.c
+--- a/src/drivers/driver_nl80211.c
++++ b/src/drivers/driver_nl80211.c
+@@ -58,6 +58,18 @@ enum nlmsgerr_attrs {
+ #define SOL_NETLINK 270
+ #endif
+ 
++#ifndef NLA_S8
++#define NLA_S8 NLA_U8
++/*
++ * libnl before 3.7 does not define signed 8-bit attribute helpers.
++ * These values are still one byte wide, so older headers can validate
++ * them as NLA_U8 and read the payload directly.
++ */
++static inline int8_t nla_get_s8(struct nlattr *nla)
++{
++	return *(int8_t *) nla_data(nla);
++}
++#endif
+ 
+ #ifdef ANDROID
+ /* system/core/libnl_2 does not include nl_socket_set_nonblocking() */
