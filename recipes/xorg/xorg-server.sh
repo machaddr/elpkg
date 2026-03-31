@@ -40,4 +40,8 @@ package() {
 
     install -dm755 "$pkgdir/etc/X11/xorg.conf.d"
     install -dm755 "$pkgdir/var/lib/xkb"
+
+    rm -f \
+        "$pkgdir/usr/lib/xorg/modules/drivers/modesetting_drv.so" \
+        "$pkgdir/usr/share/man/man4/modesetting.4"
 }
