@@ -18,6 +18,13 @@ cd $srcdir
 tar -xvf $srcdir/$pkgver.tar.gz
 cd $srcdir/dracut-ng-$pkgver
 
+# SomaLinux live media boots from a squashfs image and uses OverlayFS for
+# writes, so dmsquash-live must not hard-require dmsetup/device-mapper.
+sed -i \
+    -e 's/^    echo dm rootfs-block img-lib overlayfs initqueue$/    echo rootfs-block img-lib overlayfs initqueue/' \
+    -e '/^    inst_multiple umount dmsetup blkid dd losetup blockdev find rmdir grep stat$/c\    inst_multiple umount blkid dd losetup blockdev find rmdir grep stat\n    inst_multiple -o dmsetup' \
+    modules.d/70dmsquash-live/module-setup.sh
+
 ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --libexecdir=/usr/lib --disable-documentation
 
 make -j"$(nproc)"
