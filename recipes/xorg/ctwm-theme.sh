@@ -3,7 +3,7 @@ set -euo pipefail
 
 pkgname="ctwm-theme"
 pkgver="1.0"
-pkgrel=6
+pkgrel=7
 arch=("x86_64" "i686")
 source=(
     "https://www.ctwm.org/themes/neo-classic/neo-classic.tar.gz"
@@ -29,7 +29,6 @@ package() {
     install -dm755 \
         "$pkgdir/etc/X11/ctwm" \
         "$pkgdir/etc/X11/xinit" \
-        "$pkgdir/root" \
         "$pkgdir/usr/share/ctwm/themes/neo-classic" \
         "$pkgdir/usr/share/doc/ctwm-theme"
 
@@ -45,7 +44,7 @@ package() {
         "$srcdir/.ctwmrc" > "$pkgdir/etc/X11/ctwm/somalinux-neo-classic.ctwmrc"
     ln -sf somalinux-neo-classic.ctwmrc "$pkgdir/etc/X11/ctwm/system.ctwmrc"
 
-    cat > "$pkgdir/etc/X11/xinit/xinitrc.somalinux-neo-classic" <<'EOF_XINIT'
+    cat > "$pkgdir/etc/X11/xinit/xinitrc" <<'EOF_XINIT'
 #!/bin/sh
 
 xrdb="xrdb"
@@ -94,12 +93,5 @@ xterm -name login -ls -geometry 100x28+40+40 &
 
 exec ctwm
 EOF_XINIT
-    chmod 755 "$pkgdir/etc/X11/xinit/xinitrc.somalinux-neo-classic"
-    ln -sf xinitrc.somalinux-neo-classic "$pkgdir/etc/X11/xinit/xinitrc"
-
-    cat > "$pkgdir/root/.xinitrc" <<'EOF_ROOT_XINITRC'
-#!/bin/sh
-exec /etc/X11/xinit/xinitrc
-EOF_ROOT_XINITRC
-    chmod 755 "$pkgdir/root/.xinitrc"
+    chmod 755 "$pkgdir/etc/X11/xinit/xinitrc"
 }
