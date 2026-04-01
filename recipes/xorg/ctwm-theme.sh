@@ -41,8 +41,7 @@ package() {
     # Keep the upstream Neo-Classic ctwmrc, but point pixmaps at the
     # packaged system location instead of a per-user home directory.
     sed 's|^PixmapDirectory ".*"|PixmapDirectory "/usr/share/ctwm/themes/neo-classic"|' \
-        "$srcdir/.ctwmrc" > "$pkgdir/etc/X11/ctwm/somalinux-neo-classic.ctwmrc"
-    ln -sf somalinux-neo-classic.ctwmrc "$pkgdir/etc/X11/ctwm/system.ctwmrc"
+        "$srcdir/.ctwmrc" > "$pkgdir/etc/X11/ctwm/system.ctwmrc"
 
     cat > "$pkgdir/etc/X11/xinit/xinitrc" <<'EOF_XINIT'
 #!/bin/sh
