@@ -3,410 +3,290 @@ set -euo pipefail
 
 pkgname="ctwm-theme"
 pkgver="1.0"
-pkgrel=2
+pkgrel=5
 arch=("x86_64" "i686")
-source=()
-sha256sums=()
-depends=("ctwm" "xclock" "xinit" "xorg-applications" "xorg-extra-apps" "xorg-fonts" "xterm")
+source=("https://www.ctwm.org/themes/neo-classic/neo-classic.tar.gz")
+sha256sums=("b87a5a7541772b167dda5f0bdd71a2772ade9c38124dda9d2a107518b478c0a7")
+depends=("ctwm" "xinit" "xorg-applications" "xorg-extra-apps" "xorg-fonts" "xterm")
 makedepends=()
-description="NetBSD-inspired CTWM session defaults for SomaLinux"
+description="Neo-Classic CTWM session defaults for SomaLinux"
 
 build() {
-    :
+    cd "$srcdir"
+    rm -rf neo-classic
+    tar -xzf "$srcdir/neo-classic.tar.gz"
 }
 
 package() {
+    cd "$srcdir/neo-classic"
+
     install -dm755 \
         "$pkgdir/etc/X11/ctwm" \
-        "$pkgdir/etc/X11/Xresources" \
         "$pkgdir/etc/X11/xinit" \
         "$pkgdir/root" \
-        "$pkgdir/usr/libexec/somalinux" \
-        "$pkgdir/usr/share/doc/netbsd-ctwm-theme"
+        "$pkgdir/usr/share/ctwm/themes/neo-classic" \
+        "$pkgdir/usr/share/doc/ctwm-theme"
 
-    cat > "$pkgdir/usr/libexec/somalinux/ctwm_app_menu" <<'EOF_SCRIPT'
-#!/bin/sh
-set -eu
+    install -m644 \
+        grey-iconify.xpm \
+        grey-size.xpm \
+        macfocus.xpm \
+        "$pkgdir/usr/share/ctwm/themes/neo-classic/"
 
-app_dirs=""
-for dir in /usr/share/applications /usr/local/share/applications "${HOME:-}/.local/share/applications"; do
-    if [ -d "$dir" ]; then
-        app_dirs="$app_dirs $dir"
-    fi
-done
+    cat > "$pkgdir/etc/X11/ctwm/somalinux-neo-classic.ctwmrc" <<'EOF_CTWM'
+# -*- shell-script -*-
 
-[ -n "$app_dirs" ] || exit 0
-
-find $app_dirs -name '*.desktop' -exec awk -F= '
-    function resetentry() {
-        name = menu = exec = ""
-        terminal = nodisplay = 0
-    }
-    function quote(s) {
-        gsub(/\\/, "\\\\", s)
-        gsub(/\"/, "\\\"", s)
-        gsub(/\t/, "\\t", s)
-        return "\"" s "\""
-    }
-    function printentry() {
-        if (nodisplay || !name || !exec) {
-            return
-        }
-        if (terminal) {
-            exec = "xterm -class UXTerm -e " exec
-        }
-        if (!menu) {
-            menu = "Misc"
-        }
-        printf "%02d\t%s\t%s\t%s\n", menuorder[menu], quote(menu), quote(" " name), "!" quote(exec " &")
-    }
-    function iskey(k) { return $1 == k }
-    function value(v) { v = $0; sub(/^[^=]*=/, "", v); return v }
-
-    BEGIN {
-        menuno = 0
-        menuorder["Accessories"] = menuno++
-        menuorder["Games"] = menuno++
-        menuorder["Graphics"] = menuno++
-        menuorder["Internet"] = menuno++
-        menuorder["Multimedia"] = menuno++
-        menuorder["Office"] = menuno++
-        menuorder["Programming"] = menuno++
-        menuorder["System"] = menuno++
-        menuorder["Misc"] = menuno++
-        for (menu in menuorder) {
-            printf "%02d\t%s\n", menuorder[menu], quote(menu)
-        }
-
-        catmenu["Audio"] = "Multimedia"
-        catmenu["Development"] = "Programming"
-        catmenu["Game"] = "Games"
-        catmenu["Graphics"] = "Graphics"
-        catmenu["Network"] = "Internet"
-        catmenu["Office"] = "Office"
-        catmenu["System"] = "System"
-        catmenu["Utility"] = "Accessories"
-
-        catno = 0
-        catorder[catno++] = "Audio"
-        catorder[catno++] = "Development"
-        catorder[catno++] = "Graphics"
-        catorder[catno++] = "Game"
-        catorder[catno++] = "Office"
-        catorder[catno++] = "Network"
-        catorder[catno++] = "System"
-        catorder[catno++] = "Utility"
-
-        resetentry()
-    }
-
-                    { gsub(/\r/, "") }
-    FNR == 1 && NR > 1 { printentry() }
-    END             { printentry() }
-    FNR == 1        { resetentry() }
-
-    iskey("Name") && !name      { name = value() }
-    /^Terminal=true$/           { terminal = 1 }
-    iskey("OnlyShowIn")         { nodisplay = 1 }
-    /^NoDisplay=true$/          { nodisplay = 1 }
-    iskey("Exec") && !exec      {
-        exec = value()
-        gsub(/ %.*/, "", exec)
-        if (exec ~ /\"/) {
-            nodisplay = 1
-        }
-    }
-    iskey("Categories") && !menu {
-        categories = value()
-        for (i = 0; i < catno; i++) {
-            if (categories ~ catorder[i]) {
-                menu = catmenu[catorder[i]]
-                break
-            }
-        }
-    }
-' '{}' + |
-sort -u |
-awk -F '\t' '
-    function startmenu(menu) {
-        printf "menu %s\n", menu
-        printf "{\n"
-        printf "\t%s\tf.title\n", menu
-        curmenu = menu
-    }
-    function endmenu() {
-        if (curmenu) {
-            printf "}\n"
-        }
-    }
-
-    $2 != curmenu { endmenu(); startmenu($2) }
-    NF == 4       { printf "\t%s %s \n", $3, $4 }
-    END           { endmenu() }
-'
-EOF_SCRIPT
-    chmod 755 "$pkgdir/usr/libexec/somalinux/ctwm_app_menu"
-
-    cat > "$pkgdir/etc/X11/ctwm/somalinux-netbsd.ctwmrc" <<'EOF_CTWM'
 NoDefaults
 
-DontShowWelcomeWindow
-ShowWorkSpaceManager
-ShowIconManager
-UseThreeDBorders
-UseThreeDTitles
+PixmapDirectory "/usr/share/ctwm/themes/neo-classic"
 
-TitleFont       "9x15bold"
-MenuFont        "9x15"
-IconManagerFont "9x15"
-IconFont        "9x15"
-ResizeFont      "9x15"
-WorkSpaceFont   "9x15bold"
-
-WorkSpaceManagerGeometry "70x250-4-4" 1
-IconManagerGeometry      "240x-1-1+0" 1
-BorderWidth              3
-ThreeDBorderWidth        3
-
-RestartPreviousState
-DecorateTransients
-DontPaintRootWindow
-NoOpaqueMove
-NoOpaqueResize
-AutoRelativeResize
-CenterFeedbackWindow
-NoGrabServer
-RaiseOnClick
-DontMoveOff
-MoveOffResistance 150
-ConstrainedMoveTime 0
-IgnoreLockModifier
-RandomPlacement "on"
-ClearShadowContrast 40
-DarkShadowContrast 60
-StayUpMenus
-WarpToDefaultMenuEntry
-MenuShadowDepth 1
-WindowRing
-WarpRingOnScreen
-NoTitleHighlight
-TitleButtonShadowDepth 1
-TitleShadowDepth 1
-TitleButtonBorderWidth 0
-TitlePadding 0
-TitleJustification "left"
-ButtonIndent 0
-FramePadding 0
-BorderShadowDepth 2
-BorderResizeCursors
-MaxIconTitleWidth 160
-NoIconManagerFocus
-IconManagerShadowDepth 1
-IconifyByUnmapping
-ReallyMoveInWorkspaceManager
-MapWindowCurrentWorkSpace { "black" "darkorange3" }
-DontToggleWorkSpaceManagerState
-DontWarpCursorInWMap
-NoShowOccupyAll
-ReverseCurrentWorkspace
-StartInMapState
-WMgrHorizButtonIndent 0
-WMgrVertButtonIndent 0
-
-LeftTitleButton  ":xpm:dot"    = f.menu "titleops"
-RightTitleButton ":xpm:resize" = f.resize
-RightTitleButton ":xpm:cross"  = f.delete
-
-WorkSpaces
+Color
 {
-    "1" { "lavender" "black" "darkslateblue" "white" }
-    "2" { "lavender" "black" "darkslateblue" "white" }
-    "3" { "lavender" "black" "darkslateblue" "white" }
-    "4" { "lavender" "black" "darkslateblue" "white" }
-    "5" { "lavender" "black" "darkslateblue" "white" }
+    BorderColor           "grey65"
+    BorderTileBackground  "black"
+    DefaultBackground     "grey65"
+    DefaultForeground     "black"
+    TitleBackground       "grey70"
+    TitleForeground       "black"
+    MenuBackground        "grey70"
+    MenuForeground        "black"
+    MenuTitleBackground   "grey40"
+    MenuTitleForeground   "black"
+    IconManagerBackground "grey90"
+    IconManagerForeground "black"
+    IconManagerHighlight  "black"
 }
 
 Cursors
 {
-    Frame   "left_ptr"
-    Title   "left_ptr"
-    Icon    "left_ptr"
-    IconMgr "left_ptr"
+    Frame   "top_left_arrow"
+    Title   "top_left_arrow"
+    Icon    "box_spiral"
+    IconMgr "top_left_arrow"
     Move    "fleur"
-    Resize  "fleur"
-    Menu    "left_ptr"
+    Resize  "sizing"
+    Menu    "sb_left_arrow"
     Button  "hand2"
     Wait    "watch"
     Select  "dot"
     Destroy "pirate"
 }
 
-Color
+Pixmaps
 {
-    BorderColor           "black"
-    BorderTileBackground  "darkslateblue"
-    BorderTileForeground  "darkslateblue"
-    DefaultBackground     "lavender"
-    DefaultForeground     "black"
-    TitleBackground       "lavender"
-    TitleForeground       "black"
-    MenuBackground        "lavender"
-    MenuForeground        "black"
-    MenuTitleBackground   "darkorange3"
-    MenuTitleForeground   "black"
-    MenuShadowColor       "gray15"
-    IconBackground        "lavender"
-    IconForeground        "black"
-    IconBorderColor       "darkslateblue"
-    IconManagerBackground "lavender"
-    IconManagerForeground "black"
-    IconManagerHighlight  "firebrick"
-    MapWindowBackground   "lavender"
-    MapWindowForeground   "black"
+    TitleHighlight "xpm:macfocus.xpm"
 }
 
-esyscmd(/usr/libexec/somalinux/ctwm_app_menu)
+TitleFont "-*-helvetica-medium-r-*-*-10-*-*-*-p-*-*-*"
+MenuFont "-*-helvetica-medium-r-*-*-10-*-*-*-p-*-*-*"
+WorkspaceFont "-*-helvetica-medium-r-*-*-8-*-*-*-*-*-*-*"
 
-menu "appmenu"
+ShowWorkSpaceManager
+UsePPosition "on"
+WarpCursor
+WorkSpaceManagerGeometry "190x22-0-0" 6
+StartInMapState
+
+DontPaintRootWindow
+
+WorkSpaces
 {
-    "Applications" f.title
-    " Accessories" f.menu "Accessories"
-    " Games"       f.menu "Games"
-    " Graphics"    f.menu "Graphics"
-    " Internet"    f.menu "Internet"
-    " Multimedia"  f.menu "Multimedia"
-    " Office"      f.menu "Office"
-    " Programming" f.menu "Programming"
-    " System"      f.menu "System"
-    " Misc"        f.menu "Misc"
+    "1" { "grey60" "black" "grey60" "black" }
+    "2" { "grey60" "black" "grey60" "black" }
+    "3" { "grey60" "black" "grey60" "black" }
+    "4" { "grey60" "black" "grey60" "black" }
+    "5" { "grey60" "black" "grey60" "black" }
+    "6" { "grey60" "black" "grey60" "black" }
 }
 
-menu "deskutils"
+OccupyAll
 {
-    "Desktop utilities" f.title
-    " Calculator"       !"xcalc &"
-    " Text editor"      !"xedit &"
-    ""                  f.separator
-    " XEyes"            !"xeyes &"
-    " XConsole"         !"xconsole &"
-    " Magnify"          !"xmag -source 100x100 &"
-    " Bitmap editor"    !"bitmap &"
-    " Kill window"      !"xkill &"
+    "swisswatch"
+    "xwatch"
 }
 
-menu "termutils"
+NoShowOccupyAll
+
+UseThreeDMenus
+
+ButtonIndent 0
+TitleButtonBorderWidth 0
+
+FramePadding 2
+NoGrabServer
+NoHighLight
+NoRaiseOnMove
+RestartPreviousState
+DecorateTransients
+BorderWidth 1
+IconifyByUnmapping
+
+Notitle
 {
-    "Terminal utilities" f.title
-    " Terminal"          !"uxterm &"
-    " XTerm"             !"xterm &"
-    " Top processes"     !"xterm -class UXTerm -e top &"
-    " Editor"            !"xterm -class UXTerm -e vi &"
+    ""
+    "rclock"
+    "swisswatch"
+    "TWM Icon Manager"
+    "WorkSpaceManager"
+    "xbiff"
+    "xphone"
+    "Dali Clock"
 }
 
-menu "SomaLinux"
+IconManagerDontShow
 {
-    "SomaLinux"          f.title
-    ""                   f.separator
-    " Terminal"          !"uxterm &"
-    " Clock"             !"xclock &"
-    ""                   f.separator
-    " Applications"      f.menu "appmenu"
-    " Desktop utilities" f.menu "deskutils"
-    " Terminal utilities" f.menu "termutils"
-    ""                   f.separator
-    " Restart CTWM"      f.twmrc
-    " Quit"              f.quit
+    "TWM Icon Manager"
+    "X DeskTop Manager"
+    "xclock"
+    "rclock"
+    "xbiff"
+    "xload"
 }
 
-menu "titleops"
+DontIconifyByUnmapping
 {
-    "Window"      f.title
-    ""            f.separator
-    " Iconify"    f.iconify
-    " Resize"     f.resize
-    " Move"       f.move
-    ""            f.separator
-    " Occupy ..." f.occupy
-    " Occupy All" f.occupyall
-    ""            f.separator
-    " Raise"      f.raise
-    " Lower"      f.lower
-    ""            f.separator
-    " Zoom"       f.fullzoom
-    " Zoom-V"     f.zoom
-    " Zoom-H"     f.horizoom
-    ""            f.separator
-    " Stick"      f.stick
-    " Close"      f.delete
+    "xclock"
+    "rclock"
+    "xbiff"
+    "xload"
+    "Dali Clock"
+    "Untitled"
 }
 
-Function "raise-move"       { f.raise f.deltastop f.forcemove }
-Function "raise-and-resize" { f.raise f.deltastop f.resize }
+MoveDelta 3
+Function "move-or-lower" { f.move f.deltastop f.lower }
+Function "move-or-raise" { f.move f.deltastop f.raise }
+Function "move-or-iconify" { f.move f.deltastop f.iconify }
 
-Button1 = : root          : f.menu "SomaLinux"
-Button2 = : root          : f.menu "TwmAllWindows"
-Button3 = : root          : f.menu "SomaLinux"
-Button1 = : title          : f.function "raise-move"
-Button2 = : title          : f.function "raise-and-resize"
-Button3 = : title | frame : f.menu "titleops"
-Button1 = : frame          : f.function "raise-and-resize"
-Button1 = : icon | iconmgr : f.iconify
-Button2 = : icon           : f.move
-Button3 = : icon | iconmgr : f.raiselower
+LeftTitleButton "xpm:grey-iconify.xpm" = f.iconify
+RightTitleButton "xpm:grey-size.xpm" = f.resize
 
-"space" = mod1 : window : f.menu "titleops"
-"p"     = mod1 : all    : f.menu "SomaLinux"
+Button1 = : root : f.menu "defops"
+Button2 = : root : f.menu "programs"
+Button3 = : root : f.menu "programs"
+
+Button1 = m : window|icon : f.function "move-or-lower"
+Button2 = m : window|icon : f.iconify
+Button3 = m : window|icon : f.function "move-or-raise"
+
+Button1 = : title : f.function "move-or-raise"
+Button2 = : title : f.raiselower
+
+Button1 = : icon : f.function "move-or-iconify"
+Button2 = : icon : f.iconify
+
+Button1 = : iconmgr : f.iconify
+Button2 = : iconmgr : f.iconify
+
+menu "defops"
+{
+    "Twm"          f.title
+    "Iconify"      f.iconify
+    "Resize"       f.resize
+    "Move"         f.move
+    "Raise"        f.raise
+    "Lower"        f.lower
+    ""             f.nop
+    "Focus"        f.focus
+    "Unfocus"      f.unfocus
+    "Show Iconmgr" f.showiconmgr
+    "Hide Iconmgr" f.hideiconmgr
+    ""             f.nop
+    "Kill"         f.destroy
+    "Delete"       f.delete
+    ""             f.nop
+    "Restart"      f.restart
+    "Exit"         f.quit
+}
+
+menu "programs"
+{
+    "Xorg Applications"  f.title
+    "XTerm"              f.exec "xterm -ls &"
+    "Classic X Extras"   f.menu "extra-apps"
+    ""                   f.nop
+    "Current X Clients"  f.exec "xterm -T 'X Clients' -e sh -lc \"xlsclients; printf '\\nPress Enter to close...'; read _\" &"
+    "Display Info"       f.exec "xterm -T 'Display Info' -e sh -lc \"xdpyinfo; printf '\\nPress Enter to close...'; read _\" &"
+    "Display Modes"      f.exec "xterm -T 'Display Modes' -e sh -lc \"xrandr --query; printf '\\nPress Enter to close...'; read _\" &"
+    "Window Info"        f.exec "xwininfo &"
+    "Window Properties"  f.exec "xprop &"
+    "Event Tester"       f.exec "xev &"
+    "Kill Window"        f.exec "xkill &"
+    "Message Box"        f.exec "xmessage 'SomaLinux CTWM is running.' &"
+}
+
+menu "extra-apps"
+{
+    "Xorg Extra Applications" f.title
+    "Calculator"             f.exec "xcalc &"
+    "Console"                f.exec "xconsole &"
+    "Text Editor"            f.exec "xedit &"
+    "XEyes"                  f.exec "xeyes &"
+    "Load Monitor"           f.exec "xload &"
+    "Magnifier"              f.exec "xmag &"
+    "Ico Demo"               f.exec "ico &"
+    "Bitmap Editor"          f.exec "bitmap &"
+    "Clock"                  f.exec "oclock &"
+    "Mail Checker"           f.exec "xbiff &"
+}
 EOF_CTWM
+    ln -sf somalinux-neo-classic.ctwmrc "$pkgdir/etc/X11/ctwm/system.ctwmrc"
 
-    ln -sf somalinux-netbsd.ctwmrc "$pkgdir/etc/X11/ctwm/system.ctwmrc"
-
-    cat > "$pkgdir/etc/X11/Xresources/somalinux-netbsd" <<'EOF_XRES'
-XTerm*background: black
-XTerm*foreground: white
-XTerm*cursorColor: goldenrod
-XTerm*saveLines: 4096
-XTerm*scrollBar: false
-XTerm*rightScrollBar: false
-XTerm*borderWidth: 1
-XTerm*VT100*font: 9x15
-UXTerm*background: black
-UXTerm*foreground: white
-UXTerm*cursorColor: goldenrod
-UXTerm*saveLines: 4096
-UXTerm*scrollBar: false
-UXTerm*rightScrollBar: false
-UXTerm*borderWidth: 1
-UXTerm*VT100*font: 9x15
-EOF_XRES
-
-    cat > "$pkgdir/etc/X11/xinit/xinitrc.somalinux-netbsd" <<'EOF_XINIT'
+    cat > "$pkgdir/etc/X11/xinit/xinitrc.somalinux-neo-classic" <<'EOF_XINIT'
 #!/bin/sh
 
-userresources=$HOME/.Xresources
-usermodmap=$HOME/.Xmodmap
-sysresources=/etc/X11/Xresources/somalinux-netbsd
-xinitdir=/etc/X11/xinit/xinitrc.d
+xrdb="xrdb"
+xmodmap="xmodmap"
+xinitdir="/etc/X11/xinit"
 
-[ -f "$sysresources" ] && xrdb -merge "$sysresources"
-[ -f "$userresources" ] && xrdb -merge "$userresources"
-[ -f "$usermodmap" ] && xmodmap "$usermodmap"
+userresources="$HOME/.Xresources"
+usermodmap="$HOME/.Xmodmap"
+sysresources="$xinitdir/.Xresources"
+sysmodmap="$xinitdir/.Xmodmap"
 
-if [ -d "$xinitdir" ]; then
-    for script in "$xinitdir"/*.sh; do
-        [ -x "$script" ] && . "$script"
-    done
+if [ -f "$sysresources" ]; then
+    if [ -x /usr/bin/cpp ]; then
+        "$xrdb" -merge "$sysresources"
+    else
+        "$xrdb" -nocpp -merge "$sysresources"
+    fi
 fi
 
-xsetroot -solid '#51459a' -cursor_name left_ptr
-xset b off
+if [ -f "$sysmodmap" ]; then
+    "$xmodmap" "$sysmodmap"
+fi
+
+if [ -f "$userresources" ]; then
+    if [ -x /usr/bin/cpp ]; then
+        "$xrdb" -merge "$userresources"
+    else
+        "$xrdb" -nocpp -merge "$userresources"
+    fi
+fi
+
+if [ -f "$usermodmap" ]; then
+    "$xmodmap" "$usermodmap"
+fi
+
+if [ -d "$xinitdir/xinitrc.d" ]; then
+    for f in "$xinitdir/xinitrc.d"/?*.sh; do
+        [ -x "$f" ] && . "$f"
+    done
+    unset f
+fi
+
+xsetroot -solid DodgerBlue4 -cursor_name left_ptr
+
+xterm -name login -ls -geometry 100x28+40+40 &
 
 exec ctwm
 EOF_XINIT
-    chmod 755 "$pkgdir/etc/X11/xinit/xinitrc.somalinux-netbsd"
+    chmod 755 "$pkgdir/etc/X11/xinit/xinitrc.somalinux-neo-classic"
+    ln -sf xinitrc.somalinux-neo-classic "$pkgdir/etc/X11/xinit/xinitrc"
 
     cat > "$pkgdir/root/.xinitrc" <<'EOF_ROOT_XINITRC'
 #!/bin/sh
-exec /etc/X11/xinit/xinitrc.somalinux-netbsd
+exec /etc/X11/xinit/xinitrc
 EOF_ROOT_XINITRC
     chmod 755 "$pkgdir/root/.xinitrc"
 
@@ -422,8 +302,9 @@ if [ -z "${DISPLAY:-}" ] && [ -r /proc/cmdline ] && [ -x /usr/bin/startx ]; then
 fi
 EOF_BASH_PROFILE
 
-    cat > "$pkgdir/usr/share/doc/netbsd-ctwm-theme/README" <<'EOF_README'
-SomaLinux ships a NetBSD-inspired ctwm session profile.
+    cat > "$pkgdir/usr/share/doc/ctwm-theme/README" <<'EOF_README'
+SomaLinux ships the upstream Neo-Classic ctwm session profile as the
+system-wide default.
 
 Start the desktop with:
   startx
@@ -433,8 +314,10 @@ Graphical boot entry:
 
 Installed defaults:
   /etc/X11/ctwm/system.ctwmrc
-  /etc/X11/Xresources/somalinux-netbsd
-  /etc/X11/xinit/xinitrc.somalinux-netbsd
+  /etc/X11/ctwm/somalinux-neo-classic.ctwmrc
+  /etc/X11/xinit/xinitrc
+  /etc/X11/xinit/xinitrc.somalinux-neo-classic
+  /usr/share/ctwm/themes/neo-classic
   /root/.xinitrc
   /root/.bash_profile
 EOF_README
