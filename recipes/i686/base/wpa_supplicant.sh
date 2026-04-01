@@ -3,7 +3,7 @@ set -euo pipefail
 
 pkgname="wpa_supplicant"
 pkgver="2.11"
-pkgrel=3
+pkgrel=4
 arch=("i686")
 source=("https://w1.fi/releases/wpa_supplicant-$pkgver.tar.gz")
 sha256sums=("912ea06f74e30a8e36fbb68064d6cdff218d8d591db0fc5d75dee6c81ac7fc0a")
