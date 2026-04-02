@@ -5,7 +5,7 @@ diff --git a/src/drivers/driver_nl80211.c b/src/drivers/driver_nl80211.c
  #define SOL_NETLINK 270
  #endif
  
-+#if !defined(LIBNL_VER_NUM) || LIBNL_VER_NUM < LIBNL_VER(3, 7)
++#if !defined(LIBNL_VER_NUM)
 +#define NLA_S8 NLA_U8
 +/*
 + * libnl before 3.7 does not define signed 8-bit attribute helpers.
