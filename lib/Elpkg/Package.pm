@@ -5,8 +5,10 @@ use warnings;
 use File::Spec;
 use File::Temp qw(tempdir);
 use File::Basename qw(dirname);
+use File::Copy qw(copy);
 use File::Path qw(make_path remove_tree);
 use File::Find qw(find);
+use Fcntl qw(:mode);
 use Elpkg::PkgMeta qw(read_package_meta meta_db_name meta_db_relpath);
 use Elpkg::Util qw(
   ensure_dir run_cmd run_capture tar_supports_flag
@@ -346,6 +348,7 @@ sub _apply_staged {
     my $backup_root;
     my @ops;
     my $tmp_tx;
+    my $live_root = _is_live_root($root);
 
     if ($tx && $txn) {
         $backup_root = $tx->{backup_dir};
@@ -365,33 +368,33 @@ sub _apply_staged {
             die "missing staged file: $rel" if !-e $src && !-l $src;
             ensure_dir(dirname($dest));
 
-        if ($self->_is_config_file($rel) && (-e $dest || -l $dest)) {
-            my $same = 0;
-            if (-f $dest && -f $src) {
-                my $old = sha256_file($dest);
-                my $new = sha256_file($src);
-                $same = ($old eq $new);
-            }
-            if ($same) {
-                _remove_path($src);
+            if ($self->_is_config_file($rel) && (-e $dest || -l $dest)) {
+                my $same = 0;
+                if (-f $dest && -f $src) {
+                    my $old = sha256_file($dest);
+                    my $new = sha256_file($src);
+                    $same = ($old eq $new);
+                }
+                if ($same) {
+                    _remove_path($src);
+                    next;
+                }
+                my $new_rel = $rel . '.elpkg-new';
+                my $new_path = File::Spec->catfile($root, $new_rel);
+                ensure_dir(dirname($new_path));
+                _move_preserve($src, $new_path);
+                if ($tx && $txn) {
+                    $self->_tx_record_added($tx, $txn, $new_rel);
+                } else {
+                    push @ops, { type => 'remove', path => $new_path };
+                }
                 next;
             }
-            my $new_rel = $rel . '.elpkg-new';
-            my $new_path = File::Spec->catfile($root, $new_rel);
-            ensure_dir(dirname($new_path));
-            _move_preserve($src, $new_path);
-            if ($tx && $txn) {
-                $self->_tx_record_added($tx, $txn, $new_rel);
-            } else {
-                push @ops, { type => 'remove', path => $new_path };
-            }
-            next;
-        }
 
-        if (-e $dest || -l $dest) {
-            my $bak = File::Spec->catfile($backup_root, $rel);
-            ensure_dir(dirname($bak));
-            _move_preserve($dest, $bak);
+            if (-e $dest || -l $dest) {
+                my $bak = File::Spec->catfile($backup_root, $rel);
+                ensure_dir(dirname($bak));
+                _move_preserve($dest, $bak);
                 if ($tx && $txn) {
                     $self->_tx_record_backup($tx, $txn, $rel);
                 } else {
@@ -404,6 +407,15 @@ sub _apply_staged {
                     push @ops, { type => 'remove', path => $dest };
                 }
             }
+
+            if ($live_root) {
+                # Replacing glibc in the live root temporarily removes the
+                # dynamic loader. Avoid spawning tar/bash until the new files
+                # are back in place.
+                _move_preserve($src, $dest);
+                next;
+            }
+
             push @bulk_rels, $rel;
         }
 
@@ -482,8 +494,39 @@ sub _rollback_ops {
 sub _move_preserve {
     my ($src, $dst) = @_;
     return if rename $src, $dst;
-    run_cmd(['cp', '-a', '--', $src, $dst]);
+    _copy_path_preserve($src, $dst);
     _remove_path($src);
+}
+
+sub _copy_path_preserve {
+    my ($src, $dst) = @_;
+    my @st = lstat($src) or die "lstat $src: $!";
+    my $mode = $st[2];
+    my $uid = $st[4];
+    my $gid = $st[5];
+    my $atime = $st[8];
+    my $mtime = $st[9];
+
+    _remove_path($dst) if -e $dst || -l $dst;
+    ensure_dir(dirname($dst));
+
+    if (S_ISLNK($mode)) {
+        my $target = readlink($src);
+        die "readlink $src: $!" if !defined $target;
+        symlink $target, $dst or die "symlink $src -> $dst: $!";
+        eval { lchown($uid, $gid, $dst); 1; };
+        return;
+    }
+
+    if (S_ISREG($mode)) {
+        copy($src, $dst) or die "copy $src -> $dst: $!";
+        chmod(S_IMODE($mode), $dst) or die "chmod $dst: $!";
+        chown($uid, $gid, $dst) or die "chown $dst: $!";
+        utime($atime, $mtime, $dst) or die "utime $dst: $!";
+        return;
+    }
+
+    die "unsupported file type in package payload: $src";
 }
 
 sub _remove_path {
@@ -501,6 +544,12 @@ sub _shell_quote {
     $s = '' if !defined $s;
     $s =~ s/'/'"'"'/g;
     return "'$s'";
+}
+
+sub _is_live_root {
+    my ($root) = @_;
+    return 0 if !defined $root || $root eq '';
+    return File::Spec->canonpath($root) eq File::Spec->rootdir();
 }
 
 sub _run_script {
