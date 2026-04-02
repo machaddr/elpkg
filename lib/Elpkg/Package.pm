@@ -41,23 +41,25 @@ sub install_pkg_file {
 
     my $db = $self->{db};
     return $db->with_lock(sub {
-        my $installed = $db->load_installed();
-        my $files_db = $db->load_files();
+        my $current = $db->get_installed_pkg($name);
+        my $owners = $db->owners_for_paths($files);
 
-        if ($installed->{packages}{$name} && !$reinstall && !$upgrade) {
+        if ($current && !$reinstall && !$upgrade) {
             return { status => 'already-installed', name => $name };
         }
 
         my $old_files = [];
-        if ($installed->{packages}{$name}) {
+        my $old_owners = {};
+        if ($current) {
             my $old = $db->get_pkg($name);
             $old_files = $old->{files} || [];
+            $old_owners = $db->owners_for_paths($old_files) if @$old_files;
         }
 
         # conflict check
         my %conflicts;
         for my $f (@$files) {
-            my $owner = $files_db->{files}{$f};
+            my $owner = $owners->{$f};
             next if !$owner;
             next if $owner eq $name;
             $conflicts{$f} = $owner;
@@ -80,7 +82,7 @@ sub install_pkg_file {
 
             my $stage = $self->_tx_stage_dir($tx);
             $self->_extract_pkg_to($pkgfile, $stage, $jobs);
-            $self->_apply_staged($stage, $root, $files, $tx, $txn);
+            $self->_apply_staged($stage, $root, $files, $tx, $txn, $jobs);
 
             $self->_run_script($scripts->{post_install}, $root, $name, 'post_install', $jobs) if $scripts->{post_install};
             $self->_run_hooks('post_install', $root, $name, $action, $jobs);
@@ -94,11 +96,12 @@ sub install_pkg_file {
         }
 
         # remove files from old version if upgrading
-        if ($installed->{packages}{$name}) {
+        my @removed_old_files;
+        if ($current) {
             my %newset = map { $_ => 1 } @$files;
             for my $f (@$old_files) {
                 next if $newset{$f};
-                next if $files_db->{files}{$f} && $files_db->{files}{$f} ne $name;
+                next if $old_owners->{$f} && $old_owners->{$f} ne $name;
                 if ($tx && $txn) {
                     $self->_tx_backup($tx, $txn, $root, $f);
                 } else {
@@ -109,9 +112,9 @@ sub install_pkg_file {
                         # remove later
                     }
                 }
-                delete $files_db->{files}{$f};
+                push @removed_old_files, $f;
             }
-            _cleanup_dirs($root, $old_files, $files_db->{files});
+            _cleanup_dirs($root, $old_files, $old_owners);
         }
 
         # reconcile ownership if overwriting other packages' files
@@ -131,14 +134,9 @@ sub install_pkg_file {
             pkgfile => $pkgfile,
             file_count => scalar(@$files),
         };
-        $installed->{packages}{$name} = $record;
-
-        for my $f (@$files) {
-            $files_db->{files}{$f} = $name;
-        }
-
-        $db->save_installed($installed);
-        $db->save_files($files_db);
+        $db->save_installed_pkg($record);
+        $db->set_file_owners($name, $files);
+        $db->delete_file_owners(\@removed_old_files) if @removed_old_files;
         $db->save_pkg($name, {
             manifest => $manifest,
             files => $files,
@@ -170,12 +168,12 @@ sub remove_pkg {
 
     my $db = $self->{db};
     return $db->with_lock(sub {
-        my $installed = $db->load_installed();
-        my $files_db = $db->load_files();
+        my $installed_pkg = $db->get_installed_pkg($name);
         my $pkg = $db->get_pkg($name);
-        die "package not installed: $name" if !$pkg;
+        die "package not installed: $name" if !$pkg || !$installed_pkg;
         my $files = $pkg->{files} || [];
         my $scripts = $pkg->{scripts} || {};
+        my $owners = $db->owners_for_paths($files);
 
         my ($tx, $txn) = $self->_tx_begin('remove', $name, $root);
         if ($tx && $txn && $pkg->{manifest}) {
@@ -188,7 +186,7 @@ sub remove_pkg {
             $self->_run_script($scripts->{pre_remove}, $root, $name, 'pre_remove', $jobs) if $scripts->{pre_remove};
 
             for my $f (@$files) {
-                next if $files_db->{files}{$f} && $files_db->{files}{$f} ne $name;
+                next if $owners->{$f} && $owners->{$f} ne $name;
                 if ($tx && $txn) {
                     $self->_tx_backup($tx, $txn, $root, $f);
                 } else {
@@ -197,17 +195,16 @@ sub remove_pkg {
                         unlink $path;
                     }
                 }
-                delete $files_db->{files}{$f};
             }
 
-            _cleanup_dirs($root, $files, $files_db->{files});
+            _cleanup_dirs($root, $files, $owners);
 
             $self->_run_script($scripts->{post_remove}, $root, $name, 'post_remove', $jobs) if $scripts->{post_remove};
             $self->_run_hooks('post_remove', $root, $name, 'remove', $jobs);
 
-            delete $installed->{packages}{$name};
-            $db->save_installed($installed);
-            $db->save_files($files_db);
+            my @owned_files = grep { !defined($owners->{$_}) || $owners->{$_} eq $name } @$files;
+            $db->remove_installed_pkg($name);
+            $db->delete_file_owners(\@owned_files) if @owned_files;
             $db->remove_pkg($name);
 
             1;
@@ -248,36 +245,48 @@ sub _read_meta {
     my ($self, $pkgfile, $tmp, $jobs) = @_;
     ensure_dir($tmp);
     my %tar_env = $self->_tar_env($jobs);
-    my @list = ('tar', '-tf', $pkgfile);
-    if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
-        @list = ('tar', '--zstd', '-tf', $pkgfile);
-    }
-    my $toc = run_capture(\@list, quiet => 1, env => \%tar_env);
-    my @entries = grep { $_ ne '' } map { s/\r//gr } split /\n/, ($toc || '');
-
-    my $meta_prefix;
     my $meta_rel = meta_db_relpath();
-    for my $e (@entries) {
-        if ($e =~ m{^(?:\./)?\Q$meta_rel\E$}) {
-            ($meta_prefix) = $e =~ m{^(.*?/)?\Q$meta_rel\E$};
-            last;
+    my $meta_extracted = 0;
+
+    if (tar_supports_flag('--wildcards') && tar_supports_flag('--no-anchored')) {
+        my @tar = ('tar', '-xf', $pkgfile, '-C', $tmp, '--wildcards', '--no-anchored', $meta_rel);
+        if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
+            @tar = ('tar', '--zstd', '-xf', $pkgfile, '-C', $tmp, '--wildcards', '--no-anchored', $meta_rel);
         }
+        $meta_extracted = run_cmd(\@tar, env => \%tar_env, quiet => 1);
     }
 
-    if ($meta_prefix) {
-        my $pattern = ($meta_prefix // '') . $meta_rel;
-        my @tar = ('tar', '-xf', $pkgfile, '-C', $tmp, '--wildcards', $pattern);
+    if (!$meta_extracted) {
+        my @list = ('tar', '-tf', $pkgfile);
         if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
-            @tar = ('tar', '--zstd', '-xf', $pkgfile, '-C', $tmp, '--wildcards', $pattern);
+            @list = ('tar', '--zstd', '-tf', $pkgfile);
         }
-        run_cmd(\@tar, env => \%tar_env);
-    } else {
-        # Fallback: extract whole package and locate meta directory
-        my @full = ('tar', '-xf', $pkgfile, '-C', $tmp);
-        if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
-            @full = ('tar', '--zstd', '-xf', $pkgfile, '-C', $tmp);
+        my $toc = run_capture(\@list, quiet => 1, env => \%tar_env);
+        my @entries = grep { $_ ne '' } map { s/\r//gr } split /\n/, ($toc || '');
+
+        my $meta_prefix;
+        for my $e (@entries) {
+            if ($e =~ m{^(?:\./)?\Q$meta_rel\E$}) {
+                ($meta_prefix) = $e =~ m{^(.*?/)?\Q$meta_rel\E$};
+                last;
+            }
         }
-        run_cmd(\@full, env => \%tar_env);
+
+        if ($meta_prefix) {
+            my $pattern = ($meta_prefix // '') . $meta_rel;
+            my @tar = ('tar', '-xf', $pkgfile, '-C', $tmp, '--wildcards', $pattern);
+            if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
+                @tar = ('tar', '--zstd', '-xf', $pkgfile, '-C', $tmp, '--wildcards', $pattern);
+            }
+            run_cmd(\@tar, env => \%tar_env);
+        } else {
+            # Fallback: extract whole package and locate meta directory
+            my @full = ('tar', '-xf', $pkgfile, '-C', $tmp);
+            if ($pkgfile =~ /\.zst$/ && tar_supports_flag('--zstd')) {
+                @full = ('tar', '--zstd', '-xf', $pkgfile, '-C', $tmp);
+            }
+            run_cmd(\@full, env => \%tar_env);
+        }
     }
 
     my $meta_dir = File::Spec->catdir($tmp, 'meta');
@@ -333,7 +342,7 @@ sub _extract_pkg_to {
 }
 
 sub _apply_staged {
-    my ($self, $stage, $root, $files, $tx, $txn) = @_;
+    my ($self, $stage, $root, $files, $tx, $txn, $jobs) = @_;
     my $backup_root;
     my @ops;
     my $tmp_tx;
@@ -349,6 +358,7 @@ sub _apply_staged {
     }
 
     my $ok = eval {
+        my @bulk_rels;
         for my $rel (@$files) {
             my $src = File::Spec->catfile($stage, $rel);
             my $dest = File::Spec->catfile($root, $rel);
@@ -394,7 +404,11 @@ sub _apply_staged {
                     push @ops, { type => 'remove', path => $dest };
                 }
             }
-            _move_preserve($src, $dest);
+            push @bulk_rels, $rel;
+        }
+
+        if (@bulk_rels) {
+            $self->_copy_relpaths_via_tar($stage, $root, \@bulk_rels, $jobs);
         }
         1;
     };
@@ -411,6 +425,46 @@ sub _apply_staged {
 
     remove_tree($stage) if -d $stage;
     remove_tree($tmp_tx) if $tmp_tx && -d $tmp_tx;
+}
+
+sub _copy_relpaths_via_tar {
+    my ($self, $src_root, $dst_root, $rels, $jobs) = @_;
+    return if !$rels || !@$rels;
+
+    my $base = File::Spec->catdir($self->{cfg}->{tmp_dir}, 'tar-lists');
+    ensure_dir($base);
+    my $tmp = tempdir('elpkg-tar-XXXXXX', DIR => $base, CLEANUP => 0);
+    my $list = File::Spec->catfile($tmp, 'files.list');
+    open my $fh, '>', $list or die "write $list: $!";
+    for my $rel (@$rels) {
+        print {$fh} $rel, "\n";
+    }
+    close $fh;
+
+    my @create = ('tar', '-cf', '-', '-C', $src_root, '-T', $list);
+    my @extract = ('tar', '-xpf', '-', '-C', $dst_root, '--numeric-owner');
+    if (tar_supports_flag('--xattrs')) {
+        push @create, '--xattrs';
+        push @extract, '--xattrs';
+    }
+    if (tar_supports_flag('--acls')) {
+        push @create, '--acls';
+        push @extract, '--acls';
+    }
+
+    my $bash = $ENV{ELPKG_BASH} || which_cmd('bash') || '/bin/bash';
+    my $cmd = join(' ', map { _shell_quote($_) } @create) .
+        ' | ' .
+        join(' ', map { _shell_quote($_) } @extract);
+    my %tar_env = $self->_tar_env($jobs);
+
+    my $ok = eval {
+        run_cmd([$bash, '-o', 'pipefail', '-c', $cmd], env => \%tar_env);
+        1;
+    };
+
+    remove_tree($tmp) if -d $tmp;
+    die $@ if !$ok;
 }
 
 sub _rollback_ops {
@@ -440,6 +494,13 @@ sub _remove_path {
     } elsif (-d $path) {
         remove_tree($path);
     }
+}
+
+sub _shell_quote {
+    my ($s) = @_;
+    $s = '' if !defined $s;
+    $s =~ s/'/'"'"'/g;
+    return "'$s'";
 }
 
 sub _run_script {
@@ -653,7 +714,7 @@ sub repair_files {
     my $ok = eval {
         my $stage = $self->_tx_stage_dir($tx);
         $self->_extract_pkg_to($pkgfile, $stage, $jobs);
-        $self->_apply_staged($stage, $root, \@want, $tx, $txn);
+        $self->_apply_staged($stage, $root, \@want, $tx, $txn, $jobs);
         1;
     };
     if (!$ok) {

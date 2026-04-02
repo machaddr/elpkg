@@ -107,7 +107,7 @@ sub build_recipe {
         if (!-f $dest) {
             my $local = $self->_find_local_source($filename);
             if ($local) {
-                copy($local, $dest) or die "copy $local -> $dest: $!";
+                _link_or_copy_file($local, $dest);
             } else {
                 download_file($url, $dest);
             }
@@ -119,11 +119,7 @@ sub build_recipe {
         push @source_paths, $dest;
         my $src_copy = File::Spec->catfile($srcdir, $filename);
         if (!-f $src_copy) {
-            open my $in, '<', $dest or die "copy $dest: $!";
-            open my $out, '>', $src_copy or die "copy $src_copy: $!";
-            binmode $in; binmode $out;
-            while (read($in, my $buf, 8192)) { print {$out} $buf; }
-            close $in; close $out;
+            _link_or_copy_file($dest, $src_copy);
         }
     }
 
@@ -194,11 +190,7 @@ sub build_recipe {
     ensure_dir($meta_dir);
 
     # per-file hashes for integrity checking
-    my %hashes;
-    for my $rel (@files) {
-        my $path = File::Spec->catfile($pkgdir, $rel);
-        $hashes{$rel} = sha256_file($path);
-    }
+    my %hashes = $self->_hash_many($pkgdir, \@files, $jobs, File::Spec->catdir($work, 'hash'));
 
     my $manifest = {
         name => $pkgname,
@@ -281,6 +273,77 @@ sub _find_local_source {
         return $path if -f $path;
     }
     return undef;
+}
+
+sub _link_or_copy_file {
+    my ($src, $dst) = @_;
+    return if link($src, $dst);
+    copy($src, $dst) or die "copy $src -> $dst: $!";
+}
+
+sub _hash_many {
+    my ($self, $root, $rels, $jobs, $base) = @_;
+    my %hashes;
+    return %hashes if !$rels || !@$rels;
+
+    $jobs = 1 if !defined $jobs || $jobs !~ /^\d+$/ || $jobs < 1;
+    $jobs = 1 if @$rels < 16;
+    $jobs = 32 if $jobs > 32;
+    $jobs = scalar(@$rels) if $jobs > @$rels;
+
+    if ($jobs <= 1) {
+        for my $rel (@$rels) {
+            my $path = File::Spec->catfile($root, $rel);
+            $hashes{$rel} = sha256_file($path);
+        }
+        return %hashes;
+    }
+
+    ensure_dir($base);
+    my @pids;
+    my @outputs;
+    for my $worker (0 .. $jobs - 1) {
+        my $out = File::Spec->catfile($base, "worker-$worker.txt");
+        my $pid = fork();
+        die "fork failed: $!" if !defined $pid;
+        if ($pid == 0) {
+            open my $fh, '>', $out or die "write $out: $!";
+            for (my $i = $worker; $i < @$rels; $i += $jobs) {
+                my $rel = $rels->[$i];
+                my $path = File::Spec->catfile($root, $rel);
+                my $sha = sha256_file($path);
+                print {$fh} $rel, "\t", $sha, "\n";
+            }
+            close $fh;
+            exit 0;
+        }
+        push @pids, $pid;
+        push @outputs, $out;
+    }
+
+    my $failed = 0;
+    for my $pid (@pids) {
+        my $wp = waitpid($pid, 0);
+        next if $wp < 0;
+        if ($? != 0) {
+            $failed = 1;
+        }
+    }
+    die "parallel file hashing failed" if $failed;
+
+    for my $out (@outputs) {
+        open my $fh, '<', $out or die "read $out: $!";
+        while (my $line = <$fh>) {
+            chomp $line;
+            my ($rel, $sha) = split /\t/, $line, 2;
+            next if !defined $rel || !defined $sha;
+            $hashes{$rel} = $sha;
+        }
+        close $fh;
+        unlink $out;
+    }
+
+    return %hashes;
 }
 
 sub _resolve_make_jobs {

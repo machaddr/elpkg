@@ -376,11 +376,21 @@ sub _prepare_perl_runtime_refresh {
 sub _installed_manifest_map {
     my ($self) = @_;
     my $installed = $self->{db}->load_installed();
+    my $manifests = $self->{db}->load_pkg_manifests();
     my %installed_info;
 
     for my $pkgname (keys %{ $installed->{packages} || {} }) {
-        my $pkg = $self->{db}->get_pkg($pkgname);
-        my $manifest = $pkg && $pkg->{manifest} ? $pkg->{manifest} : { name => $pkgname };
+        my $manifest = $manifests->{$pkgname} || {
+            name => $pkgname,
+            version => $installed->{packages}{$pkgname}->{version},
+            release => $installed->{packages}{$pkgname}->{release},
+            arch => $installed->{packages}{$pkgname}->{arch},
+            deps => $installed->{packages}{$pkgname}->{deps} || [],
+            provides => [],
+            conflicts => [],
+            description => $installed->{packages}{$pkgname}->{description} || '',
+            build_date => 0,
+        };
         $installed_info{$pkgname} = $manifest;
     }
 

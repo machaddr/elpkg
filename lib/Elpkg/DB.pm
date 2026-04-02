@@ -51,6 +51,38 @@ sub load_installed {
     return { packages => \%packages };
 }
 
+sub get_installed_pkg {
+    my ($self, $name) = @_;
+    my $dbh = $self->_connect();
+    $self->_verify_integrity($dbh);
+
+    my $row = $dbh->selectrow_hashref(
+        'SELECT name, version, release, arch, description, install_time, pkgfile, file_count ' .
+        'FROM installed_packages WHERE name = ?',
+        undef,
+        $name,
+    );
+    if (!$row) {
+        $dbh->disconnect();
+        return undef;
+    }
+
+    my $pkg = {
+        name => $row->{name},
+        version => $row->{version},
+        release => int($row->{release} // 1),
+        arch => $row->{arch} // '',
+        deps => $self->_load_list($dbh, 'installed_deps', 'dep', $row->{name}),
+        description => $row->{description} // '',
+        install_time => int($row->{install_time} // 0),
+        pkgfile => $row->{pkgfile} // '',
+        file_count => int($row->{file_count} // 0),
+    };
+
+    $dbh->disconnect();
+    return $pkg;
+}
+
 sub save_installed {
     my ($self, $data) = @_;
     my $dbh = $self->_connect();
@@ -105,6 +137,35 @@ sub load_files {
     return { files => \%files };
 }
 
+sub owners_for_paths {
+    my ($self, $paths) = @_;
+    my %owners;
+    return \%owners if !$paths || !@$paths;
+
+    my $dbh = $self->_connect();
+    $self->_verify_integrity($dbh);
+
+    my $chunk_size = 500;
+    for (my $i = 0; $i < @$paths; $i += $chunk_size) {
+        my $end = $i + $chunk_size - 1;
+        $end = $#$paths if $end > $#$paths;
+        my @chunk = @$paths[$i .. $end];
+        next if !@chunk;
+        my $placeholders = join(',', ('?') x @chunk);
+        my $rows = $dbh->selectall_arrayref(
+            "SELECT path, owner FROM file_owners WHERE path IN ($placeholders)",
+            { Slice => {} },
+            @chunk,
+        );
+        for my $row (@$rows) {
+            $owners{$row->{path}} = $row->{owner};
+        }
+    }
+
+    $dbh->disconnect();
+    return \%owners;
+}
+
 sub save_files {
     my ($self, $data) = @_;
     my $dbh = $self->_connect();
@@ -115,6 +176,36 @@ sub save_files {
     my $sth = $dbh->prepare('INSERT INTO file_owners(path, owner) VALUES(?, ?)');
     for my $path (sort keys %$files) {
         $sth->execute($path, $files->{$path});
+    }
+    $dbh->commit();
+    $dbh->disconnect();
+}
+
+sub set_file_owners {
+    my ($self, $owner, $paths) = @_;
+    return if !$paths || !@$paths;
+
+    my $dbh = $self->_connect();
+    $dbh->begin_work();
+    my $sth = $dbh->prepare(
+        'INSERT OR REPLACE INTO file_owners(path, owner) VALUES(?, ?)'
+    );
+    for my $path (@$paths) {
+        $sth->execute($path, $owner);
+    }
+    $dbh->commit();
+    $dbh->disconnect();
+}
+
+sub delete_file_owners {
+    my ($self, $paths) = @_;
+    return if !$paths || !@$paths;
+
+    my $dbh = $self->_connect();
+    $dbh->begin_work();
+    my $sth = $dbh->prepare('DELETE FROM file_owners WHERE path = ?');
+    for my $path (@$paths) {
+        $sth->execute($path);
     }
     $dbh->commit();
     $dbh->disconnect();
@@ -174,6 +265,97 @@ sub get_pkg {
         hashes => \%hashes,
         config_files => \@config_files,
     };
+}
+
+sub load_pkg_manifests {
+    my ($self) = @_;
+    my $dbh = $self->_connect();
+    $self->_verify_integrity($dbh);
+
+    my $rows = $dbh->selectall_arrayref(
+        'SELECT name, version, release, arch, description, build_date FROM package_manifests ORDER BY name',
+        { Slice => {} },
+    );
+
+    my %manifests;
+    for my $row (@$rows) {
+        $manifests{$row->{name}} = {
+            name => $row->{name},
+            version => $row->{version},
+            release => int($row->{release} // 1),
+            arch => $row->{arch} // '',
+            description => $row->{description} // '',
+            build_date => int($row->{build_date} // 0),
+            deps => [],
+            provides => [],
+            conflicts => [],
+        };
+    }
+
+    my @list_specs = (
+        ['package_deps', 'dep', 'deps'],
+        ['package_provides', 'provide', 'provides'],
+        ['package_conflicts', 'conflict', 'conflicts'],
+    );
+    for my $spec (@list_specs) {
+        my ($table, $column, $field) = @$spec;
+        my $list_rows = $dbh->selectall_arrayref(
+            "SELECT name, $column FROM $table ORDER BY name, seq",
+            { Slice => {} },
+        );
+        for my $row (@$list_rows) {
+            next if !$manifests{$row->{name}};
+            push @{ $manifests{$row->{name}}->{$field} }, $row->{$column};
+        }
+    }
+
+    $dbh->disconnect();
+    return \%manifests;
+}
+
+sub save_installed_pkg {
+    my ($self, $pkg) = @_;
+    my $name = $pkg->{name} // '';
+    die 'save_installed_pkg requires package name' if $name eq '';
+
+    my $dbh = $self->_connect();
+    $dbh->begin_work();
+
+    $dbh->do(
+        'INSERT OR REPLACE INTO installed_packages(name, version, release, arch, description, install_time, pkgfile, file_count) ' .
+        'VALUES(?, ?, ?, ?, ?, ?, ?, ?)',
+        undef,
+        $name,
+        $pkg->{version} // '',
+        defined $pkg->{release} ? $pkg->{release} : 1,
+        $pkg->{arch} // '',
+        $pkg->{description} // '',
+        defined $pkg->{install_time} ? $pkg->{install_time} : 0,
+        $pkg->{pkgfile} // '',
+        defined $pkg->{file_count} ? $pkg->{file_count} : 0,
+    );
+
+    $dbh->do('DELETE FROM installed_deps WHERE name = ?', undef, $name);
+    my $deps = $pkg->{deps} || [];
+    my $dep_sth = $dbh->prepare(
+        'INSERT INTO installed_deps(name, seq, dep) VALUES(?, ?, ?)'
+    );
+    for my $i (0 .. $#$deps) {
+        $dep_sth->execute($name, $i, $deps->[$i]);
+    }
+
+    $dbh->commit();
+    $dbh->disconnect();
+}
+
+sub remove_installed_pkg {
+    my ($self, $name) = @_;
+    my $dbh = $self->_connect();
+    $dbh->begin_work();
+    $dbh->do('DELETE FROM installed_deps WHERE name = ?', undef, $name);
+    $dbh->do('DELETE FROM installed_packages WHERE name = ?', undef, $name);
+    $dbh->commit();
+    $dbh->disconnect();
 }
 
 sub save_pkg {
@@ -387,9 +569,11 @@ sub _load_list {
 sub _verify_integrity {
     my ($self, $dbh) = @_;
     return if !$self->{cfg}->{verify_db};
+    return if $self->{_integrity_checked};
     my ($status) = $dbh->selectrow_array('PRAGMA quick_check');
     die "sqlite integrity check failed for $self->{db_path}: $status"
         if !defined $status || lc($status) ne 'ok';
+    $self->{_integrity_checked} = 1;
 }
 
 1;
