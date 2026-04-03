@@ -3,7 +3,7 @@ set -euo pipefail
 
 pkgname="gtk2"
 pkgver="2.24.33"
-pkgrel=2
+pkgrel=3
 arch=("x86_64" "i686")
 source=("https://download.gnome.org/sources/gtk+/2.24/gtk+-$pkgver.tar.xz")
 sha256sums=("SKIP")
@@ -16,6 +16,7 @@ build() {
     tar -xf "$srcdir/gtk+-$pkgver.tar.xz"
     cd "$srcdir/gtk+-$pkgver"
     patch -Np1 -i "$patchdir/gtk2-$pkgver-gcc15_fixes-1.patch"
+    export CFLAGS="${CFLAGS:+$CFLAGS }-std=gnu17"
 
     ./configure \
         --prefix=/usr \
