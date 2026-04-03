@@ -85,15 +85,13 @@ diff --git a/gtk/gtkcellrendererspin.c b/gtk/gtkcellrendererspin.c
 index 2a3961b..7129d05 100644
 --- a/gtk/gtkcellrendererspin.c
 +++ b/gtk/gtkcellrendererspin.c
-@@ -207,7 +207,7 @@ gtk_cell_renderer_spin_set_property (GObject      *object,
- 	}
- 
+@@ -209,7 +209,7 @@ gtk_cell_renderer_spin_set_property (GObject      *object,
        if (obj)
 -	priv->adjustment = g_object_ref_sink (obj);
 +	priv->adjustment = GTK_ADJUSTMENT (g_object_ref_sink (obj));
- 
        break;
      case PROP_CLIMB_RATE:
+       priv->climb_rate = g_value_get_double (value);
 diff --git a/gtk/gtkcomboboxtext.c b/gtk/gtkcomboboxtext.c
 index 9ffba68..5e75323 100644
 --- a/gtk/gtkcomboboxtext.c
