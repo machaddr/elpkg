@@ -9,6 +9,7 @@ source=("https://github.com/lxde/libfm/archive/refs/tags/$pkgver.tar.gz")
 sha256sums=("SKIP")
 depends=("glib" "gtk2" "menu-cache")
 makedepends=("autoconf" "automake" "gettext" "glib" "gtk2" "intltool" "libtool" "menu-cache" "pkgconf")
+provides=("libfm-extra=$pkgver")
 description="Core file management library used by PCManFM and LXPanel"
 
 build() {
