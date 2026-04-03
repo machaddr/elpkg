@@ -3,7 +3,7 @@ set -euo pipefail
 
 pkgname="keybinder"
 pkgver="0.3.1"
-pkgrel=1
+pkgrel=2
 arch=("x86_64" "i686")
 source=("https://github.com/engla/keybinder/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=("SKIP")
@@ -19,9 +19,11 @@ build() {
     build_root="$(find "$srcdir" -maxdepth 1 -mindepth 1 -type d -name 'keybinder-*' | head -n 1)"
     cd "$build_root"
 
+    touch ChangeLog gtk-doc.make
     autoreconf -fi
     ./configure \
         --prefix=/usr \
+        --disable-gtk-doc \
         --disable-python \
         --enable-introspection=no
     make -j"$(nproc)"
