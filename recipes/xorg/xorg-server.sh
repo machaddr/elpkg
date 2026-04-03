@@ -7,7 +7,6 @@ pkgrel=2
 arch=("x86_64" "i686")
 source=(
     "https://www.x.org/pub/individual/xserver/xorg-server-21.1.21.tar.xz"
-    "https://www.linuxfromscratch.org/patches/blfs/13.0/xorg-server-21.1.21-tearfree_backport-1.patch"
 )
 sha256sums=("SKIP" "SKIP")
 depends=("dbus" "libepoxy" "libtirpc" "libxcvt" "pixman" "xcb-utilities" "xkeyboard-config" "xorg-fonts")
