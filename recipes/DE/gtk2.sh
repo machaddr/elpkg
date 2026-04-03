@@ -3,18 +3,19 @@ set -euo pipefail
 
 pkgname="gtk2"
 pkgver="2.24.33"
-pkgrel=1
+pkgrel=2
 arch=("x86_64" "i686")
 source=("https://download.gnome.org/sources/gtk+/2.24/gtk+-$pkgver.tar.xz")
 sha256sums=("SKIP")
 depends=("atk" "gdk-pixbuf" "glib" "pango" "xorg-libraries")
-makedepends=("atk" "gdk-pixbuf" "glib" "pango" "pkgconf" "xorg-libraries")
+makedepends=("atk" "gdk-pixbuf" "glib" "patch" "pango" "pkgconf" "xorg-libraries")
 description="GTK+ 2 widget toolkit"
 
 build() {
     cd "$srcdir"
     tar -xf "$srcdir/gtk+-$pkgver.tar.xz"
     cd "$srcdir/gtk+-$pkgver"
+    patch -Np1 -i "$patchdir/gtk2-$pkgver-gcc15_fixes-1.patch"
 
     ./configure \
         --prefix=/usr \

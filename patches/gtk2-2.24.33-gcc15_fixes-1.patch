@@ -1,0 +1,223 @@
+diff --git a/gtk/gtkimmodule.c b/gtk/gtkimmodule.c
+index 1fcb17a..445b2be 100644
+--- a/gtk/gtkimmodule.c
++++ b/gtk/gtkimmodule.c
+@@ -662,7 +662,7 @@ lookup_immodule (gchar **immodules_list)
+ 	  gboolean found;
+ 	  gchar *context_id;
+ 	  found = g_hash_table_lookup_extended (contexts_hash, *immodules_list,
+-						&context_id, NULL);
++						(gpointer *) &context_id, NULL);
+ 	  if (found)
+ 	    return context_id;
+ 	}
+diff --git a/gtk/gtkscale.c b/gtk/gtkscale.c
+index 4317523..a573b2f 100644
+--- a/gtk/gtkscale.c
++++ b/gtk/gtkscale.c
+@@ -1471,7 +1471,7 @@ gtk_scale_add_mark (GtkScale        *scale,
+   mark->position = position;
+  
+   priv->marks = g_slist_insert_sorted_with_data (priv->marks, mark,
+-                                                 (GCompareFunc) compare_marks,
++                                                 compare_marks,
+                                                  GINT_TO_POINTER (
+                                                    gtk_range_get_inverted (GTK_RANGE (scale)) 
+                                                    ));
+diff --git a/gtk/gtkuimanager.c b/gtk/gtkuimanager.c
+index d004cf1..8cbeda9 100644
+--- a/gtk/gtkuimanager.c
++++ b/gtk/gtkuimanager.c
+@@ -503,7 +503,7 @@ gtk_ui_manager_buildable_construct_child (GtkBuildable *buildable,
+   g_signal_connect (widget, "hierarchy-changed",
+ 		    G_CALLBACK (child_hierarchy_changed_cb),
+ 		    GTK_UI_MANAGER (buildable));
+-  return g_object_ref (widget);
++  return G_OBJECT (g_object_ref (widget));
+ }
+ 
+ static void
+diff --git a/gtk/tests/defaultvalue.c b/gtk/tests/defaultvalue.c
+index 64a113c..b78dcd6 100644
+--- a/gtk/tests/defaultvalue.c
++++ b/gtk/tests/defaultvalue.c
+@@ -91,13 +91,13 @@ test_type (gconstpointer data)
+   klass = g_type_class_ref (type);
+   
+   if (g_type_is_a (type, GTK_TYPE_SETTINGS))
+-    instance = g_object_ref (gtk_settings_get_default ());
++    instance = G_OBJECT (g_object_ref (gtk_settings_get_default ()));
+   else if (g_type_is_a (type, GDK_TYPE_PANGO_RENDERER))
+-    instance = g_object_ref (gdk_pango_renderer_get_default (gdk_screen_get_default ()));
++    instance = G_OBJECT (g_object_ref (gdk_pango_renderer_get_default (gdk_screen_get_default ())));
+   else if (g_type_is_a (type, GDK_TYPE_PIXMAP))
+-    instance = g_object_ref (gdk_pixmap_new (NULL, 1, 1, 1));
++    instance = G_OBJECT (g_object_ref (gdk_pixmap_new (NULL, 1, 1, 1)));
+   else if (g_type_is_a (type, GDK_TYPE_COLORMAP))
+-    instance = g_object_ref (gdk_colormap_new (gdk_visual_get_best (), TRUE));
++    instance = G_OBJECT (g_object_ref (gdk_colormap_new (gdk_visual_get_best (), TRUE)));
+   else if (g_type_is_a (type, GDK_TYPE_WINDOW))
+     {
+       GdkWindowAttr attributes;
+@@ -105,7 +105,7 @@ test_type (gconstpointer data)
+       attributes.event_mask = 0;
+       attributes.width = 100;
+       attributes.height = 100;
+-      instance = g_object_ref (gdk_window_new (NULL, &attributes, 0));
++      instance = G_OBJECT (g_object_ref (gdk_window_new (NULL, &attributes, 0)));
+     }
+   else
+     instance = g_object_new (type, NULL);
+diff --git a/modules/other/gail/gailtreeview.c b/modules/other/gail/gailtreeview.c
+index 23923c5..ac6ff0a 100644
+--- a/modules/other/gail/gailtreeview.c
++++ b/modules/other/gail/gailtreeview.c
+@@ -995,7 +995,7 @@ gail_tree_view_ref_child (AtkObject *obj,
+         gail_cell_add_state (cell, ATK_STATE_FOCUSABLE, FALSE);
+         if (focus_index == i)
+           {
+-            gailview->focus_cell = g_object_ref (cell);
++            gailview->focus_cell = ATK_OBJECT (g_object_ref (cell));
+             gail_cell_add_state (cell, ATK_STATE_FOCUSED, FALSE);
+             g_signal_emit_by_name (gailview,
+                                    "active-descendant-changed",
+diff --git a/gtk/gtkcellrendererspin.c b/gtk/gtkcellrendererspin.c
+index 2a3961b..7129d05 100644
+--- a/gtk/gtkcellrendererspin.c
++++ b/gtk/gtkcellrendererspin.c
+@@ -207,7 +207,7 @@ gtk_cell_renderer_spin_set_property (GObject      *object,
+ 	}
+ 
+       if (obj)
+-	priv->adjustment = g_object_ref_sink (obj);
++	priv->adjustment = GTK_ADJUSTMENT (g_object_ref_sink (obj));
+ 
+       break;
+     case PROP_CLIMB_RATE:
+diff --git a/gtk/gtkcomboboxtext.c b/gtk/gtkcomboboxtext.c
+index 9ffba68..5e75323 100644
+--- a/gtk/gtkcomboboxtext.c
++++ b/gtk/gtkcomboboxtext.c
+@@ -275,7 +275,7 @@ gtk_combo_box_text_buildable_custom_tag_start (GtkBuildable     *buildable,
+ 
+       parser_data = g_slice_new0 (ItemParserData);
+       parser_data->builder = g_object_ref (builder);
+-      parser_data->object = g_object_ref (buildable);
++      parser_data->object = (GObject *) g_object_ref (buildable);
+       parser_data->domain = gtk_builder_get_translation_domain (builder);
+       *parser = item_parser;
+       *data = parser_data;
+diff --git a/gtk/gtklabel.c b/gtk/gtklabel.c
+index c47de59..879586b 100644
+--- a/gtk/gtklabel.c
++++ b/gtk/gtklabel.c
+@@ -1336,7 +1336,7 @@ gtk_label_buildable_custom_tag_start (GtkBuildable     *buildable,
+ 
+       parser_data = g_slice_new0 (PangoParserData);
+       parser_data->builder = g_object_ref (builder);
+-      parser_data->object = g_object_ref (buildable);
++      parser_data->object = (GObject *) g_object_ref (buildable);
+       *parser = pango_parser;
+       *data = parser_data;
+       return TRUE;
+diff --git a/gtk/gtktoolpalette.c b/gtk/gtktoolpalette.c
+index b984193..ba4e472 100644
+--- a/gtk/gtktoolpalette.c
++++ b/gtk/gtktoolpalette.c
+@@ -734,7 +734,7 @@ gtk_tool_palette_add (GtkContainer *container,
+ 
+   g_ptr_array_add (palette->priv->groups, info);
+   info->pos = palette->priv->groups->len - 1;
+-  info->widget = g_object_ref_sink (child);
++  info->widget = (GtkToolItemGroup *) g_object_ref_sink (child);
+ 
+   gtk_widget_set_parent (child, GTK_WIDGET (palette));
+ }
+diff --git a/gtk/gtktreeview.c b/gtk/gtktreeview.c
+index d86bf0a..e784cf5 100644
+--- a/gtk/gtktreeview.c
++++ b/gtk/gtktreeview.c
+@@ -14148,7 +14148,7 @@ gtk_tree_view_set_search_entry (GtkTreeView *tree_view,
+ 
+   if (entry)
+     {
+-      tree_view->priv->search_entry = g_object_ref (entry);
++      tree_view->priv->search_entry = GTK_WIDGET (g_object_ref (entry));
+       tree_view->priv->search_custom_entry_set = TRUE;
+ 
+       if (tree_view->priv->search_entry_changed_id == 0)
+diff --git a/gtk/gtkwidget.c b/gtk/gtkwidget.c
+index 1d1f6bb..391df5e 100644
+--- a/gtk/gtkwidget.c
++++ b/gtk/gtkwidget.c
+@@ -10679,7 +10679,7 @@ gtk_widget_buildable_custom_tag_start (GtkBuildable     *buildable,
+       AccelGroupParserData *parser_data;
+ 
+       parser_data = g_slice_new0 (AccelGroupParserData);
+-      parser_data->object = g_object_ref (buildable);
++      parser_data->object = (GObject *) g_object_ref (buildable);
+       *parser = accel_group_parser;
+       *data = parser_data;
+       return TRUE;
+diff --git a/modules/printbackends/cups/gtkprintbackendcups.c b/modules/printbackends/cups/gtkprintbackendcups.c
+index 2a000dc..e081a70 100644
+--- a/modules/printbackends/cups/gtkprintbackendcups.c
++++ b/modules/printbackends/cups/gtkprintbackendcups.c
+@@ -3479,7 +3479,7 @@ cups_request_ppd (GtkPrinter *printer)
+   g_io_channel_set_encoding (data->ppd_io, NULL, NULL);
+   g_io_channel_set_close_on_unref (data->ppd_io, TRUE);
+ 
+-  data->printer = g_object_ref (printer);
++  data->printer = (GtkPrinterCups *) g_object_ref (printer);
+ 
+   resource = g_strdup_printf ("/printers/%s.ppd", 
+                               gtk_printer_cups_get_ppd_name (GTK_PRINTER_CUPS (printer)));
+diff --git a/tests/testentrycompletion.c b/tests/testentrycompletion.c
+index 36c41f7..c556734 100644
+--- a/tests/testentrycompletion.c
++++ b/tests/testentrycompletion.c
+@@ -237,7 +237,7 @@ animation_timer (GtkEntryCompletion *completion)
+ 	{
+ 	  g_print ("removing model!\n");
+ 
+-	  old_store = g_object_ref (gtk_entry_completion_get_model (completion));
++	  old_store = GTK_LIST_STORE (g_object_ref (gtk_entry_completion_get_model (completion)));
+ 	  gtk_entry_completion_set_model (completion, NULL);
+ 	}
+       else
+diff --git a/tests/testmenubars.c b/tests/testmenubars.c
+index 416a939..853d822 100644
+--- a/tests/testmenubars.c
++++ b/tests/testmenubars.c
+@@ -21,7 +21,7 @@
+ #include <gtk/gtk.h>
+ 
+ static GtkWidget *
+-create_menu (depth)
++create_menu (guint depth)
+ {
+     GtkWidget *menu;
+     GtkWidget *menuitem;
+@@ -70,19 +70,19 @@ create_menubar (GtkPackDirection pack_dir,
+   menuitem = gtk_image_menu_item_new_from_stock (GTK_STOCK_HOME, NULL);
+   gtk_menu_shell_append (GTK_MENU_SHELL (menubar), menuitem);
+   gtk_label_set_angle (GTK_LABEL (GTK_BIN (menuitem)->child), angle);
+-  menu = create_menu (2, TRUE);
++  menu = create_menu (2);
+   gtk_menu_item_set_submenu (GTK_MENU_ITEM (menuitem), menu);
+ 
+   menuitem = gtk_menu_item_new_with_label ("foo");
+   gtk_menu_shell_append (GTK_MENU_SHELL (menubar), menuitem);
+   gtk_label_set_angle (GTK_LABEL (GTK_BIN (menuitem)->child), angle);
+-  menu = create_menu (2, TRUE);
++  menu = create_menu (2);
+   gtk_menu_item_set_submenu (GTK_MENU_ITEM (menuitem), menu);
+ 
+   menuitem = gtk_menu_item_new_with_label ("bar");
+   gtk_menu_shell_append (GTK_MENU_SHELL (menubar), menuitem);
+   gtk_label_set_angle (GTK_LABEL (GTK_BIN (menuitem)->child), angle);
+-  menu = create_menu (2, TRUE);
++  menu = create_menu (2);
+   gtk_menu_item_set_submenu (GTK_MENU_ITEM (menuitem), menu);
+ 
+   return menubar;
