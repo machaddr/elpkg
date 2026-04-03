@@ -19,7 +19,8 @@ build() {
     meson setup build \
         --prefix=/usr \
         --buildtype=release \
-        -Ddefault_library=shared
+        -Ddefault_library=shared \
+        -Dintrospection=false
     ninja -C build
 }
 
