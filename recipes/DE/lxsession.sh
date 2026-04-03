@@ -3,12 +3,12 @@ set -euo pipefail
 
 pkgname="lxsession"
 pkgver="0.5.6"
-pkgrel=2
+pkgrel=3
 arch=("x86_64" "i686")
 source=("https://github.com/lxde/lxsession/archive/refs/tags/$pkgver.tar.gz")
 sha256sums=("SKIP")
-depends=("gtk2" "openbox" "xorg-libraries")
-makedepends=("autoconf" "automake" "gettext" "gtk2" "intltool" "libtool" "openbox" "pkgconf" "xorg-libraries")
+depends=("gtk2" "openbox" "polkit" "xorg-libraries")
+makedepends=("autoconf" "automake" "gettext" "gtk2" "intltool" "libtool" "openbox" "pkgconf" "polkit" "vala" "xorg-libraries")
 description="LXDE session manager"
 
 build() {
