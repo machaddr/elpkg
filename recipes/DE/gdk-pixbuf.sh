@@ -7,8 +7,8 @@ pkgrel=1
 arch=("x86_64" "i686")
 source=("https://download.gnome.org/sources/gdk-pixbuf/${pkgver%.*}/gdk-pixbuf-$pkgver.tar.xz")
 sha256sums=("SKIP")
-depends=("glib" "libpng" "shared-mime-info")
-makedepends=("glib" "libpng" "meson" "ninja" "pkgconf" "python" "shared-mime-info")
+depends=("glib" "libjpeg-turbo" "libpng" "shared-mime-info")
+makedepends=("glib" "libjpeg-turbo" "libpng" "meson" "ninja" "pkgconf" "python" "shared-mime-info")
 description="Image loading library"
 
 build() {
@@ -20,8 +20,10 @@ build() {
         --prefix=/usr \
         --buildtype=release \
         -Ddefault_library=shared \
+        -Dglycin=disabled \
         -Dgtk_doc=false \
         -Dintrospection=disabled \
+        -Djpeg=enabled \
         -Dman=false \
         -Dpng=enabled \
         -Dtests=false \
