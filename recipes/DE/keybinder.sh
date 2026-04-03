@@ -3,7 +3,7 @@ set -euo pipefail
 
 pkgname="keybinder"
 pkgver="0.3.1"
-pkgrel=3
+pkgrel=4
 arch=("x86_64" "i686")
 source=("https://github.com/engla/keybinder/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=("SKIP")
@@ -24,6 +24,7 @@ build() {
 EXTRA_DIST = keybinder-docs.sgml keybinder-overrides.txt version.info.in
 DISTCLEANFILES = version.info
 EOF
+    sed -i '/GTK_DOC_CHECK/d' configure.ac
     autoreconf -fi
     ./configure \
         --prefix=/usr \
