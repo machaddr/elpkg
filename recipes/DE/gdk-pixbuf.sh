@@ -7,8 +7,8 @@ pkgrel=1
 arch=("x86_64" "i686")
 source=("https://download.gnome.org/sources/gdk-pixbuf/${pkgver%.*}/gdk-pixbuf-$pkgver.tar.xz")
 sha256sums=("SKIP")
-depends=("glib" "libpng")
-makedepends=("glib" "libpng" "meson" "ninja" "pkgconf" "python")
+depends=("glib" "libpng" "shared-mime-info")
+makedepends=("glib" "libpng" "meson" "ninja" "pkgconf" "python" "shared-mime-info")
 description="Image loading library"
 
 build() {

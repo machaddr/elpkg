@@ -15,7 +15,7 @@ build() {
     local build_root
 
     cd "$srcdir"
-    tar -xf "$srcdir/$pkgver.tar.gz"
+    tar -xf "$srcdir/shared-mime-info-$pkgver.tar.gz"
     build_root="$(find "$srcdir" -maxdepth 1 -mindepth 1 -type d -name 'shared-mime-info-*' | head -n 1)"
     cd "$build_root"
 
