@@ -19,7 +19,7 @@ build() {
     tar -xf "$srcdir/xorg-server-$pkgver.tar.xz"
     cd "$srcdir/xorg-server-$pkgver"
 
-    patch -Np1 -i "$srcdir/xorg-server-$pkgver-tearfree_backport-1.patch"
+    patch -Np1 -i $patchdir/xorg-server-$pkgver-tearfree_backport-1.patch
 
     mkdir -p build
     cd build
