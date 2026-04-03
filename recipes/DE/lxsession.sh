@@ -3,7 +3,7 @@ set -euo pipefail
 
 pkgname="lxsession"
 pkgver="0.5.6"
-pkgrel=1
+pkgrel=2
 arch=("x86_64" "i686")
 source=("https://github.com/lxde/lxsession/archive/refs/tags/$pkgver.tar.gz")
 sha256sums=("SKIP")
@@ -19,6 +19,7 @@ build() {
     build_root="$(find "$srcdir" -maxdepth 1 -mindepth 1 -type d -name 'lxsession-*' | head -n 1)"
     cd "$build_root"
 
+    mkdir -p m4
     autoreconf -fi
     ./configure \
         --prefix=/usr \
