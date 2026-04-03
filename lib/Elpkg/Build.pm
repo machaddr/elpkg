@@ -170,7 +170,7 @@ sub build_recipe {
         wanted => sub {
             my $path = $File::Find::name;
             return if $path eq $pkgdir;
-            return if -d $path;
+            return if -d $path && !-l $path;
             my $rel = $path;
             $rel =~ s/^\Q$pkgdir\E\/?//;
             return if $rel eq '';
